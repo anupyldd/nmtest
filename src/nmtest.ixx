@@ -61,6 +61,35 @@ namespace detail
             return AlmostEqual<T>(a, b);
         return (a == b);
     }
+
+    template<typename F, typename Tuple = std::tuple<>>
+    [[nodiscard]]
+    constexpr auto ThrowsImpl(F&& func, Tuple&& argsTuple = {}) -> bool
+    {
+        try
+        {
+            std::apply(std::forward<F>(func), std::forward<Tuple>(argsTuple));
+            return false;
+        }
+        catch (...)
+        {
+            return true;
+        }
+    }
+
+    template<typename T>
+    [[nodiscard]]
+    constexpr auto NullImpl(T val) -> bool
+    {
+        return static_cast<bool>(!val);
+    }
+
+    template<typename T>
+    [[nodiscard]]
+    constexpr auto True(T val) -> bool
+    {
+        return val;
+    }
 }
 
 export namespace nm
@@ -77,38 +106,51 @@ export namespace nm
 
     public:
         Result(
-            const bool success,
+            const bool success = true,
             std::string type = std::string(),
             const std::source_location& loc = std::source_location())
             : success(success)
         {
-            message = std::format("Failed assert: '{}'; File: '{}'; Line: '{}'",
-                std::move(type), loc.file_name(), loc.line());
+            if (!success)
+                messages.push_back(std::format("Failed assert: '{}'; File: '{}'; Line: '{}'",
+                    std::move(type), loc.file_name(), loc.line()));
         }
 
+        // intentionally implicit
         constexpr operator bool() const
         {
             return success;
         }
 
+        constexpr Result& operator & (const Result& rhs)
+        {
+            success = (success && rhs.success);
+            if (!rhs.success)
+                for (const auto& msg : rhs.messages)
+                    messages.push_back(msg);
+            return *this;
+        }
+
         // get the message
         [[nodiscard]]
-        auto Message() const -> const std::string&
+        constexpr auto Messages() const -> const std::vector<std::string>&
         {
-            return message;
+            return messages;
         }
 
         // get the success status
         [[nodiscard]]
-        auto Success() const -> bool
+        constexpr auto Success() const -> bool
         {
             return success;
         }
 
     private:
-        std::string message;
-        bool success = false;
+        std::vector<std::string> messages;
+        bool success;
     };
+
+    /*
 
     class Report
     {
@@ -129,6 +171,7 @@ export namespace nm
             return *this;
         }
 
+        // intentionally implicit
         operator bool () const
         {
             return success;
@@ -213,6 +256,7 @@ export namespace nm
         }
 
         // get the test name
+        [[nodiscard]]
         auto Name() const -> const std::string&
         {
             return name;
@@ -355,8 +399,7 @@ export namespace nm
                     // test ----------
                     try
                     {
-                        auto rep = test.test();
-                        if (rep)
+                        if (auto rep = test.test())
                         {
                             std::println("[   PASS] {}", testName);
                         }
@@ -423,38 +466,8 @@ export namespace nm
     private:
         std::vector<nm::Suite> suites;
     };
-}
 
-namespace detail
-{
-    template<typename F, typename Tuple = std::tuple<>>
-    [[nodiscard]]
-    constexpr auto ThrowsImpl(F&& func, Tuple&& argsTuple = {}) -> bool
-    {
-        try
-        {
-            std::apply(std::forward<F>(func), std::forward<Tuple>(argsTuple));
-            return false;
-        }
-        catch (...)
-        {
-            return true;
-        }
-    }
-
-    template<typename T>
-    [[nodiscard]]
-    constexpr auto NullImpl(T val) -> bool
-    {
-        return static_cast<bool>(!val);
-    }
-
-    template<typename T>
-    [[nodiscard]]
-    constexpr auto True(T val) -> bool
-    {
-        return val;
-    }
+    */
 }
 
 export namespace nm

@@ -94,8 +94,8 @@ void TestLib()
         assert(res.Messages().empty());
 
         res
-        & Equal(1,2)
-        & NotEqual(1,1);
+        & Equal(1,2, "Cannot be equal")
+        & NotEqual(1,1, "Cannot be NOT equal");
         assert(res.Success() == false);
         assert(res.Messages().size() == 2);
     }

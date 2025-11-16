@@ -7,15 +7,25 @@ module;
 #include <exception>
 #include <unordered_map>
 #include <format>
-#include <print>
 #include <source_location>
-#include <sstream>
+#include <filesystem>
 
 export module nm;
 
 namespace detail
 {
     auto LogIndent = "          ";
+
+    // format assert with actual and expected values
+    template<typename T>
+    [[nodiscard]]
+    constexpr auto ActualExpected(
+        const std::string& type,
+        const T& actual,
+        const T& expected) -> std::string
+    {
+        return std::format("{}({} : {})", type, actual, expected);
+    }
 
     // integral type, excludes char and bool
     template<typename T>
@@ -34,6 +44,8 @@ namespace detail
 
     template<typename T>
     concept Number = Integer<T> || FloatingPoint<T>;
+
+    // ASSERT -----------------------------------------------------------------
 
     // compares floating point numbers for equality
     template<FloatingPoint T>
@@ -90,30 +102,36 @@ namespace detail
     {
         return val;
     }
+
+    // REGISTRY ---------------------------------------------------------------
+
+    class Registry
+    {
+    public:
+
+    private:
+
+    };
 }
 
 export namespace nm
 {
-    class Registry; // registry of all tests
-    class Suite;    // a test suite for grouping related tests
-    class Test;     // a single test
-    class Result;   // result of a single check
-    class Report;   // combined results of several checks
-
     class Result
     {
-        friend Report;
-
     public:
         Result(
             const bool success = true,
-            std::string type = std::string(),
+            std::string type = std::string(),       // type of assert (e.g. "Equal")
+            std::string message = std::string(),    // custom message provided by the user
             const std::source_location& loc = std::source_location())
             : success(success)
         {
             if (!success)
-                messages.push_back(std::format("Failed assert: '{}'; File: '{}'; Line: '{}'",
-                    std::move(type), loc.file_name(), loc.line()));
+            {
+                const auto filename = std::filesystem::path(loc.file_name()).filename().string();
+                messages.push_back(std::format("{} | {}:{} | {}",
+                    std::move(type), filename, loc.line(), message));
+            }
         }
 
         // intentionally implicit
@@ -476,69 +494,97 @@ export namespace nm
     // works for floating point numbers as well
     template<typename T>
     [[nodiscard]]
-    constexpr auto Equal(const T& actual, const T& expected, const std::source_location loc = std::source_location::current()) -> Result
+    constexpr auto Equal(
+        const T& actual,
+        const T& expected,
+        const std::string& message = std::string(),
+        const std::source_location loc = std::source_location::current()) -> Result
     {
         const auto res = (detail::Number<T>) ? detail::NumericEqual(actual, expected) : (actual == expected);
-        return res ? Result(true) : Result(false, std::format("Equal [{}:{}]", actual, expected), loc);
+        return res ? Result(true) : Result(false, detail::ActualExpected("Equal", actual, expected), message, loc);
     }
 
     // succeeds if actual value is NOT equal to the expected value
     // works for floating point numbers as well
     template<typename T>
     [[nodiscard]]
-    constexpr auto NotEqual(const T& actual, const T& expected, const std::source_location loc = std::source_location::current()) -> Result
+    constexpr auto NotEqual(
+        const T& actual,
+        const T& expected,
+        const std::string& message = std::string(),
+        const std::source_location loc = std::source_location::current()) -> Result
     {
         const auto res = (detail::Number<T>) ? detail::NumericEqual(actual, expected) : (actual == expected);
-        return res ? Result(false, std::format("NotEqual [{}:{}]", actual, expected), loc) : Result(true);
+        return res ? Result(false, detail::ActualExpected("NotEqual", actual, expected), message, loc) : Result(true);
     }
 
     // succeeds if passed F (function, functor, lambda) throws any exception
     template<typename F, typename Tuple = std::tuple<>>
     [[nodiscard]]
-    constexpr auto Throws(F&& func, Tuple&& argsTuple = {}, const std::source_location loc = std::source_location::current()) -> Result
+    constexpr auto Throws(
+        F&& func,
+        Tuple&& argsTuple = {},
+        const std::string& message = std::string(),
+        const std::source_location loc = std::source_location::current()) -> Result
     {
         return detail::ThrowsImpl(std::forward<F>(func), std::forward<Tuple>(argsTuple)) ?
-            Result(true) : Result(false, "Throws", loc);
+            Result(true) : Result(false, "Throws", message, loc);
     }
 
     // succeeds if passed F (function / functor / lambda / ...) does not throw any exception
     template<typename F, typename Tuple = std::tuple<>>
     [[nodiscard]]
-    constexpr auto DoesNotThrow(F&& func, Tuple&& argsTuple = {}, const std::source_location loc = std::source_location::current()) -> Result
+    constexpr auto DoesNotThrow(
+        F&& func,
+        Tuple&& argsTuple = {},
+        const std::string& message = std::string(),
+        const std::source_location loc = std::source_location::current()) -> Result
     {
         return detail::ThrowsImpl(std::forward<F>(func), std::forward<Tuple>(argsTuple)) ?
-            Result(false, "DoesNotThrow", loc) : Result(true);
+            Result(false, "DoesNotThrow", message, loc) : Result(true);
     }
 
     // succeeds if val is null
     template<typename T>
     [[nodiscard]]
-    constexpr auto Null(T val, const std::source_location loc = std::source_location::current()) -> Result
+    constexpr auto Null(
+        T val,
+        const std::string& message = std::string(),
+        const std::source_location loc = std::source_location::current()) -> Result
     {
-        return detail::NullImpl(val) ? Result(true) : Result(false, "Null", loc);
+        return detail::NullImpl(val) ? Result(true) : Result(false, "Null", message, loc);
     }
 
     // succeeds if val is NOT null
     template<typename T>
     [[nodiscard]]
-    constexpr auto NotNull(T val, const std::source_location loc = std::source_location::current()) -> Result
+    constexpr auto NotNull(
+        T val,
+        const std::string& message = std::string(),
+        const std::source_location loc = std::source_location::current()) -> Result
     {
-        return detail::NullImpl(val) ? Result(false, "NotNull", loc) : Result(true);
+        return detail::NullImpl(val) ? Result(false, "NotNull", message, loc) : Result(true);
     }
 
     // succeeds if val is true
     template<typename T>
     [[nodiscard]]
-    constexpr auto True(T val, const std::source_location loc = std::source_location::current()) -> Result
+    constexpr auto True(
+        T val,
+        const std::string& message = std::string(),
+        const std::source_location loc = std::source_location::current()) -> Result
     {
-        return detail::True(val) ? Result(true) : Result(false, "True", loc);
+        return detail::True(val) ? Result(true) : Result(false, "True", message, loc);
     }
 
     // succeeds if val is NOT true
     template<typename T>
     [[nodiscard]]
-    constexpr auto False(T val, const std::source_location loc = std::source_location::current()) -> Result
+    constexpr auto False(
+        T val,
+        const std::string& message = std::string(),
+        const std::source_location loc = std::source_location::current()) -> Result
     {
-        return detail::True(val) ? Result(false, "False", loc) : Result(true);
+        return detail::True(val) ? Result(false, "False", message, loc) : Result(true);
     }
 }

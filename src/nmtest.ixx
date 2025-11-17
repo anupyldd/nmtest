@@ -14,13 +14,13 @@ module;
 
 export module nm;
 
+// API
 export namespace nm
 {
     class Result;       // result of an assert or test
-
 }
 
-namespace detail
+namespace fmt
 {
     auto LogIndent = "          ";
 
@@ -34,7 +34,10 @@ namespace detail
     {
         return std::format("{}({} : {})", type, actual, expected);
     }
+}
 
+namespace types
+{
     // integral type, excludes char and bool
     template<typename T>
     concept Integer = std::is_integral_v<T>     &&
@@ -53,10 +56,13 @@ namespace detail
     template<typename T>
     concept Number = Integer<T> || FloatingPoint<T>;
 
-    // ASSERT -----------------------------------------------------------------
+}
+
+namespace impl
+{
 
     // compares floating point numbers for equality
-    template<FloatingPoint T>
+    template<types::FloatingPoint T>
     [[nodiscard]]
     constexpr auto AlmostEqual(T a, T b) noexcept -> bool
     {
@@ -77,14 +83,14 @@ namespace detail
     [[nodiscard]]
     constexpr auto NumericEqual(T a,T b) -> bool
     {
-        if constexpr (FloatingPoint<T>)
+        if constexpr (types::FloatingPoint<T>)
             return AlmostEqual<T>(a, b);
         return (a == b);
     }
 
     template<typename F, typename Tuple = std::tuple<>>
     [[nodiscard]]
-    constexpr auto ThrowsImpl(F&& func, Tuple&& argsTuple = {}) -> bool
+    constexpr auto Throws(F&& func, Tuple&& argsTuple = {}) -> bool
     {
         try
         {
@@ -99,7 +105,7 @@ namespace detail
 
     template<typename T>
     [[nodiscard]]
-    constexpr auto NullImpl(T val) -> bool
+    constexpr auto Null(T val) -> bool
     {
         return static_cast<bool>(!val);
     }
@@ -612,8 +618,8 @@ export namespace nm
         const std::string& message = std::string(),
         const std::source_location loc = std::source_location::current()) -> Result
     {
-        const auto res = (detail::Number<T>) ? detail::NumericEqual(actual, expected) : (actual == expected);
-        return res ? Result(true) : Result(false, detail::ActualExpected("Equal", actual, expected), message, loc);
+        const auto res = (types::Number<T>) ? impl::NumericEqual(actual, expected) : (actual == expected);
+        return res ? Result(true) : Result(false, fmt::ActualExpected("Equal", actual, expected), message, loc);
     }
 
     // succeeds if actual value is NOT equal to the expected value
@@ -626,8 +632,8 @@ export namespace nm
         const std::string& message = std::string(),
         const std::source_location loc = std::source_location::current()) -> Result
     {
-        const auto res = (detail::Number<T>) ? detail::NumericEqual(actual, expected) : (actual == expected);
-        return res ? Result(false, detail::ActualExpected("NotEqual", actual, expected), message, loc) : Result(true);
+        const auto res = (types::Number<T>) ? impl::NumericEqual(actual, expected) : (actual == expected);
+        return res ? Result(false, fmt::ActualExpected("NotEqual", actual, expected), message, loc) : Result(true);
     }
 
     // succeeds if passed F (function, functor, lambda) throws any exception
@@ -639,7 +645,7 @@ export namespace nm
         const std::string& message = std::string(),
         const std::source_location loc = std::source_location::current()) -> Result
     {
-        return detail::ThrowsImpl(std::forward<F>(func), std::forward<Tuple>(argsTuple)) ?
+        return impl::Throws(std::forward<F>(func), std::forward<Tuple>(argsTuple)) ?
             Result(true) : Result(false, "Throws", message, loc);
     }
 
@@ -652,7 +658,7 @@ export namespace nm
         const std::string& message = std::string(),
         const std::source_location loc = std::source_location::current()) -> Result
     {
-        return detail::ThrowsImpl(std::forward<F>(func), std::forward<Tuple>(argsTuple)) ?
+        return impl::Throws(std::forward<F>(func), std::forward<Tuple>(argsTuple)) ?
             Result(false, "DoesNotThrow", message, loc) : Result(true);
     }
 
@@ -664,7 +670,7 @@ export namespace nm
         const std::string& message = std::string(),
         const std::source_location loc = std::source_location::current()) -> Result
     {
-        return detail::NullImpl(val) ? Result(true) : Result(false, "Null", message, loc);
+        return impl::Null(val) ? Result(true) : Result(false, "Null", message, loc);
     }
 
     // succeeds if val is NOT null
@@ -675,7 +681,7 @@ export namespace nm
         const std::string& message = std::string(),
         const std::source_location loc = std::source_location::current()) -> Result
     {
-        return detail::NullImpl(val) ? Result(false, "NotNull", message, loc) : Result(true);
+        return impl::Null(val) ? Result(false, "NotNull", message, loc) : Result(true);
     }
 
     // succeeds if val is true
@@ -686,7 +692,7 @@ export namespace nm
         const std::string& message = std::string(),
         const std::source_location loc = std::source_location::current()) -> Result
     {
-        return detail::True(val) ? Result(true) : Result(false, "True", message, loc);
+        return impl::True(val) ? Result(true) : Result(false, "True", message, loc);
     }
 
     // succeeds if val is NOT true
@@ -697,6 +703,6 @@ export namespace nm
         const std::string& message = std::string(),
         const std::source_location loc = std::source_location::current()) -> Result
     {
-        return detail::True(val) ? Result(false, "False", message, loc) : Result(true);
+        return impl::True(val) ? Result(false, "False", message, loc) : Result(true);
     }
 }

@@ -5,12 +5,20 @@ module;
 #include <string>
 #include <algorithm>
 #include <exception>
+#include <expected>
 #include <unordered_map>
 #include <format>
 #include <source_location>
 #include <filesystem>
+#include <set>
 
 export module nm;
+
+export namespace nm
+{
+    class Result;       // result of an assert or test
+
+}
 
 namespace detail
 {
@@ -108,9 +116,113 @@ namespace detail
     class Registry
     {
     public:
+        struct TestCase
+        {
+            TestCase(
+                std::string name,
+                const std::function<nm::Result()>& func,
+                const std::function<void()>& setup = std::function<void()>(),
+                const std::function<void()>& teardown = std::function<void()>())
+                    : setup(setup), func(func), teardown(teardown), name(std::move(name)) {}
+
+            std::function<void()> setup;
+            std::function<void()> teardown;
+            std::function<nm::Result()> func;
+            std::string name;
+        };
+
+        // query to the registry for filtering
+        struct Query
+        {
+            std::vector<std::string> suites;
+            std::vector<std::string> tags;
+            std::vector<std::string> excTags;   // excluded tags
+        };
+
+        // structure containing query error info (e.g. tags/suites that were not found)
+        struct QueryError
+        {
+            std::vector<std::string> tags;
+            std::vector<std::string> suites;
+        };
+
+    public:
+        auto AddTest(
+            const TestCase& test,
+            const std::string& suite,
+            const std::initializer_list<std::string>& tags) -> void
+        {
+            allTests.emplace_back(test);
+            const auto index = allTests.size() - 1;
+
+            suiteIndex[suite].push_back(index);
+            for (const auto& tag : tags)
+                tagIndex[tag].push_back(index);
+        }
+
+        // get all tests
+        [[nodiscard]]
+        auto AllTests() const -> const std::vector<TestCase>&
+        {
+            return allTests;
+        }
+
+        // get a list of test indices filtered by the query
+        [[nodiscard]]
+        auto FilterTests(const Query& query) const
+            -> std::expected<std::vector<std::size_t>, QueryError>
+        {
+            std::vector<std::size_t> tests;
+            tests.reserve(allTests.size());
+            QueryError error; // created in advance for possible errors
+
+            for (const auto& suite : query.suites)
+            {
+                std::vector<std::size_t> curSuite;
+                try
+                {
+                    curSuite = suiteIndex.at(suite);
+                }
+                catch (const std::exception& e)
+                {
+                    error.suites.push_back(suite);
+                    continue;
+                }
+
+                for (const auto& tag : query.tags)
+                {
+                    std::vector<std::size_t> curTag;
+                    try
+                    {
+                        curTag = tagIndex.at(tag);
+                    }
+                    catch (const std::exception& e)
+                    {
+                        error.tags.push_back(tag);
+                        continue;
+                    }
+
+                    std::vector<std::size_t> intersect;
+                    std::ranges::set_intersection(curSuite, curTag, std::back_inserter(intersect));
+                    tests.insert_range(tests.end(), intersect);
+                }
+            }
+
+            if (error.suites.empty() && error.tags.empty())
+                return tests;
+            return std::unexpected(error);
+        }
+
+        // run tests with optional filtering
+        auto Run(const Query& query = Query{})
+        {
+
+        }
 
     private:
-
+        std::unordered_map<std::string, std::vector<std::size_t>> tagIndex;
+        std::unordered_map<std::string, std::vector<std::size_t>> suiteIndex;
+        std::vector<TestCase> allTests;
     };
 }
 

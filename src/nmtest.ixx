@@ -10,6 +10,7 @@ module;
 #include <format>
 #include <source_location>
 #include <filesystem>
+#include <iostream>
 #include <print>
 #include <set>
 
@@ -96,7 +97,7 @@ namespace fmt
         const std::string& testName,
         const std::string& what = std::string()) -> void
     {
-        if constexpr (what.empty())
+        if (what.empty())
             std::println("{} {}: {} function has thrown an unhandled exception",
                 fmt::error, testName, funcType);
         else
@@ -118,14 +119,20 @@ namespace fmt
         }
     }
 
-    constexpr auto ReportSummary(
-        int total,
-        int passed,
+    auto ReportSummary(
+        const int total,
+        const int passed,
         const std::vector<std::string>& failed,
         const std::vector<std::string>& errors) -> void
     {
-        std::println("{} Total: {}; Passed: {}; Failed: {}; Errors: {}",
-            summary, passed, failed.size(), errors.size());
+        std::cout <<
+            summary << " Total: " <<
+            total << "; Passed: " <<
+            passed << "; Failed: " <<
+            failed.size() << "; Errors: " <<
+            errors.size() << '\n';
+        //std::println("{} Total: {}; Passed: {}; Failed: {}; Errors: {}",
+        //    summary, passed, failed.size(), errors.size());
 
         if (!failed.empty())
         {
@@ -233,15 +240,40 @@ namespace impl
     class Registry
     {
     public:
-        struct TestCase
+        class TestCase
         {
+            friend Registry;
+
+        public:
             TestCase(
                 std::string name,
-                const std::function<nm::Result()>& func,
+                const std::function<nm::Result()>& func = std::function<nm::Result()>(),
                 const std::function<void()>& setup = std::function<void()>(),
                 const std::function<void()>& teardown = std::function<void()>())
-                    : setup(setup), func(func), teardown(teardown), name(std::move(name)) {}
+                    : setup(setup), teardown(teardown), func(func), name(std::move(name)) {}
 
+            // add the test function
+            auto Func(const std::function<nm::Result()>& fn) -> TestCase&
+            {
+                if (fn) func = fn;
+                return *this;
+            }
+
+            // add the setup function
+            auto Setup(const std::function<void()>& fn) -> TestCase&
+            {
+                if (fn) setup = fn;
+                return *this;
+            }
+
+            // add the setup function
+            auto Teardown(const std::function<void()>& fn) -> TestCase&
+            {
+                if (fn) teardown = fn;
+                return *this;
+            }
+
+        private:
             std::function<void()> setup;
             std::function<void()> teardown;
             std::function<nm::Result()> func;
@@ -282,7 +314,7 @@ namespace impl
         auto AddTest(
             const TestCase& test,
             const std::string& suite,
-            const std::initializer_list<std::string>& tags) -> void
+            const std::initializer_list<std::string>& tags) -> TestCase&
         {
             allTests.emplace_back(test);
             const auto index = allTests.size() - 1;
@@ -290,6 +322,8 @@ namespace impl
             suiteIndex[suite].push_back(index);
             for (const auto& tag : tags)
                 tagIndex[tag].push_back(index);
+
+            return allTests.back();
         }
 
         // get all tests
@@ -397,6 +431,13 @@ namespace impl
             }
         }
 
+        // get static registry instance
+        static auto Get() -> Registry&
+        {
+            static auto* reg = new Registry();
+            return *reg;
+        }
+
     private:
         // parse cli into a query
         [[nodiscard]]
@@ -407,44 +448,13 @@ namespace impl
 
         // try to run a function
         template<typename T>
+        requires (std::same_as<T, void> || std::same_as<std::decay_t<T>, nm::Result>)
         auto TryRunFunc(
             const std::string& testName,
             const FuncType funcType,
             const std::function<T()>& func) -> TestStatus
         {
-            const std::string type =
-                (funcType == FuncType::Setup) ? "Setup" :
-                (funcType == FuncType::Test)  ? "Test"  : "Teardown";
-
-            if (func)
-            {
-                try
-                {
-                    if (const std::optional<nm::Result> res = func())
-                    {
-                        fmt::ReportResult(testName, res.value());
-
-                        if (res->Success())
-                            return TestStatus::Pass;
-                        return TestStatus::Fail;
-                    }
-                    else
-                    {
-                        return TestStatus::None;
-                    }
-                }
-                catch (const std::exception& e)
-                {
-                    fmt::ReportException(type, testName, e.what());
-                    return TestStatus::Error;
-                }
-                catch (...)
-                {
-                    fmt::ReportException(type, testName);
-                    return TestStatus::Error;
-                }
-            }
-            else
+            if (!func)
             {
                 if (funcType == FuncType::Test)
                 {
@@ -453,6 +463,36 @@ namespace impl
                 }
                 return TestStatus::None;
             }
+
+            const std::string type =
+                funcType == FuncType::Setup ? "Setup" :
+                funcType == FuncType::Test  ? "Test"  : "Teardown";
+
+            try
+            {
+                if constexpr (std::same_as<std::decay_t<T>, nm::Result>)
+                {
+                    const auto res = func();
+                    fmt::ReportResult(testName, res);
+
+                    if (res.Success())
+                        return TestStatus::Pass;
+                    return TestStatus::Fail;
+                }
+
+                func();
+                return TestStatus::None;
+            }
+            catch (const std::exception& e)
+            {
+                fmt::ReportException(type, testName, e.what());
+                return TestStatus::Error;
+            }
+            catch (...)
+            {
+                fmt::ReportException(type, testName);
+                return TestStatus::Error;
+            }
         }
 
     private:
@@ -460,6 +500,28 @@ namespace impl
         std::unordered_map<std::string, std::vector<std::size_t>> suiteIndex;
         std::vector<TestCase> allTests;
     };
+}
+
+export namespace nm
+{
+    using namespace impl;
+
+    // register a test function
+    auto Test(
+        const std::string& suite,
+        const std::string& name,
+        const std::initializer_list<std::string>& tags =
+              std::initializer_list<std::string>()) -> Registry::TestCase&
+    {
+        using namespace impl;
+        return Registry::Get().AddTest(Registry::TestCase{name}, suite, tags);
+    }
+
+    // run all tests with optional filtering
+    auto Run(const int argc = 1, char** argv = nullptr) -> void
+    {
+        Registry::Get().Run(argc, argv);
+    }
 }
 
 export namespace nm

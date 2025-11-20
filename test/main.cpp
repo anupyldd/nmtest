@@ -115,6 +115,23 @@ void TestLib()
         assert(res().Success() == false);
         assert(res().Messages().size() == 2);
     }
+
+    {
+        Test("Math", "Addition", {"core", "fast"})
+        .Setup([]{ std::println("setup func"); })
+        .Teardown([]{ std::println("teardown func"); })
+        .Func([]
+        {
+            return Equal(1+1, 2)
+            & Equal(2+2, 4);
+        });
+
+        Test("Math", "Subtraction")
+        .Func([]{ return Equal(2-1, 1); });
+
+        Run();
+    }
+
     std::println("--- --- [nm] test testing finished successfully");
 
     /*

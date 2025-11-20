@@ -123,8 +123,8 @@ void TestLib()
         auto reg3 = Registry();
 
         auto& t1 = Test("Math", "Addition", {"core", "fast"});
-        t1.Setup([]{ std::println("setup func"); });
-        t1.Teardown([]{ std::println("teardown func"); });
+        t1.Setup([]{ std::println("expected setup func 1"); });
+        t1.Teardown([]{ std::println("expected teardown func 1"); });
         t1.Func([]
         {
             return Equal(1+1, 2)
@@ -132,10 +132,22 @@ void TestLib()
         });
 
         Test("Math", "Subtraction")
-        .Func([]{ return Equal(2-1, 5); });
+        .Setup([]{ std::println("expected setup func 2"); })
+        .Teardown([]{ std::println("expected teardown func 2"); })
+        .Func([]
+        {
+            return Equal(2 - 1, 5)
+            & Equal(1, 1)
+            & NotEqual(2, 2);
+        });
 
         Test("Math", "Multiplication")
-        .Func([]{ return Equal(2*2, 5, "custom message"); });
+        .Func([]
+        {
+            auto res = Equal(2 * 2, 5, "custom message");
+            res & NotEqual(1, 1);
+            return res;
+        });
 
         Run();
     }

@@ -118,9 +118,9 @@ namespace fmt
         }
         else
         {
-            std::print("{} {}: ", fail, testName);
+            std::println("{} {}: ", fail, testName);
             for (const auto& msg : res.Messages())
-                std::println("{}", msg);
+                std::println("{} {}", indent, msg);
         }
     }
 

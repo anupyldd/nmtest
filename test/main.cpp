@@ -117,17 +117,25 @@ void TestLib()
     }
 
     {
-        Test("Math", "Addition", {"core", "fast"})
-        .Setup([]{ std::println("setup func"); })
-        .Teardown([]{ std::println("teardown func"); })
-        .Func([]
+        std::println("--- --- --- should print only 1 'Registry was created'");
+        auto reg = Registry();
+        auto reg2 = Registry();
+        auto reg3 = Registry();
+
+        auto& t1 = Test("Math", "Addition", {"core", "fast"});
+        t1.Setup([]{ std::println("setup func"); });
+        t1.Teardown([]{ std::println("teardown func"); });
+        t1.Func([]
         {
             return Equal(1+1, 2)
             & Equal(2+2, 4);
         });
 
         Test("Math", "Subtraction")
-        .Func([]{ return Equal(2-1, 1); });
+        .Func([]{ return Equal(2-1, 5); });
+
+        Test("Math", "Multiplication")
+        .Func([]{ return Equal(2*2, 5, "custom message"); });
 
         Run();
     }

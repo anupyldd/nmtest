@@ -11,6 +11,7 @@ module;
 #include <source_location>
 #include <filesystem>
 #include <iostream>
+#include <numeric>
 #include <print>
 #include <set>
 
@@ -31,8 +32,12 @@ export namespace nm
             if (!success)
             {
                 const auto filename = std::filesystem::path(loc.file_name()).filename().string();
-                messages.push_back(std::format("{} | {}:{} | {}",
-                    std::move(type), filename, loc.line(), message));
+                if (message.empty())
+                    messages.push_back(std::format("{} | {}:{}",
+                        std::move(type), filename, loc.line()));
+                else
+                    messages.push_back(std::format("{} | {}:{} | {}",
+                        std::move(type), filename, loc.line(), message));
             }
         }
 
@@ -113,9 +118,9 @@ namespace fmt
         }
         else
         {
-            std::println("{} {}:", fail, testName);
+            std::print("{} {}: ", fail, testName);
             for (const auto& msg : res.Messages())
-                std::println("{} {}", indent, msg);
+                std::println("{}", msg);
         }
     }
 
@@ -150,7 +155,7 @@ namespace fmt
 
     void ReportMissingTest(const std::string& testName)
     {
-        std::println("{} {}: missing the test function", indent, testName);
+        std::println("{} {}: missing the test function", error, testName);
     }
 }
 
@@ -311,6 +316,8 @@ namespace impl
         };
 
     public:
+        Registry() { std::println("Registry was created"); }
+
         auto AddTest(
             const TestCase& test,
             const std::string& suite,
@@ -341,6 +348,13 @@ namespace impl
             std::vector<std::size_t> tests;
             tests.reserve(allTests.size());
             QueryError error; // created in advance for possible errors
+
+            if (query.tags.empty() && query.suites.empty() && query.excTags.empty())
+            {
+                tests.resize(allTests.size());
+                std::iota(tests.begin(), tests.end(), 0);
+                return tests;
+            }
 
             for (const auto& suite : query.suites)
             {
@@ -431,13 +445,6 @@ namespace impl
             }
         }
 
-        // get static registry instance
-        static auto Get() -> Registry&
-        {
-            static auto* reg = new Registry();
-            return *reg;
-        }
-
     private:
         // parse cli into a query
         [[nodiscard]]
@@ -500,27 +507,38 @@ namespace impl
         std::unordered_map<std::string, std::vector<std::size_t>> suiteIndex;
         std::vector<TestCase> allTests;
     };
+
+    // get static Registry instance
+    auto GetRegistry() -> Registry&
+    {
+        static Registry reg;
+        return reg;
+    }
 }
 
 export namespace nm
 {
-    using namespace impl;
-
     // register a test function
     auto Test(
         const std::string& suite,
         const std::string& name,
         const std::initializer_list<std::string>& tags =
-              std::initializer_list<std::string>()) -> Registry::TestCase&
+              std::initializer_list<std::string>()) -> impl::Registry::TestCase&
     {
-        using namespace impl;
-        return Registry::Get().AddTest(Registry::TestCase{name}, suite, tags);
+        auto r = impl::GetRegistry();
+        return impl::GetRegistry().AddTest(impl::Registry::TestCase{name}, suite, tags);
+    }
+
+    // get the registry
+    auto Registry() -> impl::Registry&
+    {
+        return impl::GetRegistry();
     }
 
     // run all tests with optional filtering
     auto Run(const int argc = 1, char** argv = nullptr) -> void
     {
-        Registry::Get().Run(argc, argv);
+        impl::GetRegistry().Run(argc, argv);
     }
 }
 

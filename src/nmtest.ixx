@@ -13,6 +13,7 @@ module;
 #include <iostream>
 #include <numeric>
 #include <print>
+#include <ranges>
 
 export module nm;
 
@@ -241,47 +242,175 @@ namespace impl
 
     // REGISTRY ---------------------------------------------------------------
 
+    using SetupFunc = std::function<void()>;
+    using TeardownFunc = std::function<void()>;
+    using TestFunc = std::function<nm::Result()>;
+
+    template<typename K, typename V>
+    using VectorPair = std::vector<std::pair<K, V>>;
+
     class Registry
     {
     public:
+        // setup, teardown, tags
+        class TestBase
+        {
+        public:
+            // get the setup function
+            [[nodiscard]]
+            auto Setup() const noexcept -> const SetupFunc&
+            {
+                return setup;
+            }
+
+            // get the teardown function
+            [[nodiscard]]
+            auto Teardown() const noexcept -> const TeardownFunc&
+            {
+                return teardown;
+            }
+
+            // get tags
+            [[nodiscard]]
+            auto Tags() const noexcept -> const std::vector<std::string>&
+            {
+                return tags;
+            }
+
+        protected:
+            SetupFunc setup;
+            TeardownFunc teardown;
+            std::vector<std::string> tags;
+        };
+
         class TestCase
         {
             friend Registry;
 
         public:
             TestCase(
-                std::string name,
-                const std::function<nm::Result()>& func = std::function<nm::Result()>(),
-                const std::function<void()>& setup = std::function<void()>(),
-                const std::function<void()>& teardown = std::function<void()>())
-                    : setup(setup), teardown(teardown), func(func), name(std::move(name)) {}
+                std::initializer_list<std::string> tags = std::initializer_list<std::string>(),
+                TestFunc func = TestFunc(),
+                SetupFunc setup = SetupFunc(),
+                TeardownFunc teardown = TeardownFunc())
+                    : setup(std::move(setup)), teardown(std::move(teardown)),
+                        func(std::move(func)), tags(tags) {}
 
             // add the test function
-            auto Func(const std::function<nm::Result()>& fn) -> TestCase&
+            auto Func(const TestFunc& fn) -> TestCase&
             {
                 if (fn) func = fn;
                 return *this;
             }
 
+            // get the test function
+            [[nodiscard]]
+            auto Func() const -> const TestFunc&
+            {
+                return func;
+            }
+
             // add the setup function
-            auto Setup(const std::function<void()>& fn) -> TestCase&
+            auto Setup(const SetupFunc& fn) -> TestCase&
             {
                 if (fn) setup = fn;
                 return *this;
             }
 
             // add the setup function
-            auto Teardown(const std::function<void()>& fn) -> TestCase&
+            auto Teardown(const TeardownFunc& fn) -> TestCase&
             {
                 if (fn) teardown = fn;
                 return *this;
             }
 
+            // add tags
+            auto Tags(const std::initializer_list<std::string>& tagList) -> TestCase&
+            {
+                tags.reserve(tags.size() + tagList.size());
+                for (const auto& tag : tagList)
+                    tags.push_back(tag);
+                return *this;
+            }
+
         private:
-            std::function<void()> setup;
-            std::function<void()> teardown;
-            std::function<nm::Result()> func;
-            std::string name;
+            SetupFunc setup;
+            TeardownFunc teardown;
+            TestFunc func;
+            std::vector<std::string> tags;
+        };
+
+        class TestSuite
+        {
+        public:
+            TestSuite(
+                const std::initializer_list<std::string>& tags = std::initializer_list<std::string>(),
+                SetupFunc  setup = SetupFunc(),
+                TeardownFunc  teardown = TeardownFunc())
+                    : setup(std::move(setup)), teardown(std::move(teardown)), tags(tags) {}
+
+            // add the setup function
+            auto Setup(const SetupFunc& fn) -> TestSuite&
+            {
+                if (fn) setup = fn;
+                return *this;
+            }
+
+            // get the setup function
+            [[nodiscard]]
+            auto Setup() const -> const SetupFunc&
+            {
+                return setup;
+            }
+
+            // add the setup function
+            auto Teardown(const TeardownFunc& fn) -> TestSuite&
+            {
+                if (fn) teardown = fn;
+                return *this;
+            }
+
+            // get the setup function
+            [[nodiscard]]
+            auto Teardown() const -> const TeardownFunc&
+            {
+                return teardown;
+            }
+
+            // add a test
+            auto Add(const std::string& name, const TestCase& test) -> TestCase&
+            {
+                tests.emplace_back(name, test);
+                return tests.back().second;
+            }
+
+            // add tags
+            auto Tags(const std::initializer_list<std::string>& tagList) -> void
+            {
+                tags.reserve(tags.size() + tagList.size());
+                for (const auto& tag : tagList)
+                    tags.push_back(tag);
+            }
+
+            // get tags
+            [[nodiscard]]
+            auto Tags() -> std::vector<std::string>&
+            {
+                return tags;
+            }
+
+            // get list of test indices
+            [[nodiscard]]
+            auto Tests() const -> const VectorPair<std::string, TestCase>&
+            {
+                return tests;
+            }
+
+        private:
+            SetupFunc setup;
+            TeardownFunc teardown;
+            VectorPair<std::string, TestCase> tests;
+            std::vector<std::string> tags;
         };
 
         // query to the registry for filtering
@@ -289,10 +418,9 @@ namespace impl
         {
             std::vector<std::string> suites;
             std::vector<std::string> tags;
-            std::vector<std::string> excTags;   // excluded tags
         };
 
-        // structure containing query error info (e.g. tags/suites that were not found)
+        // structure containing query error info (tags/suites that were not found)
         struct QueryError
         {
             std::vector<std::string> tags;
@@ -317,28 +445,30 @@ namespace impl
     public:
         Registry() { std::println("Registry was created"); }
 
-        auto AddTest(
-            const TestCase& test,
-            const std::string& suite,
-            const std::initializer_list<std::string>& tags) -> TestCase&
+        // register a suite
+        auto AddSuite(const std::string& name, const TestSuite& suite) -> TestSuite&
         {
-            allTests.emplace_back(test);
-            const auto index = allTests.size() - 1;
+            suites[name] = suite;
+            return suites[name];
+        }
 
-            suiteIndex[suite].push_back(index);
-            for (const auto& tag : tags)
-                tagIndex[tag].push_back(index);
-
-            return allTests.back();
+        // register a test
+        auto AddTest(
+            const std::string& suite,
+            const std::string& name,
+            const TestCase& test) -> TestCase&
+        {
+            return suites[suite].Add(name, test);
         }
 
         // get all tests
         [[nodiscard]]
-        auto AllTests() const -> const std::vector<TestCase>&
+        auto AllTests() const -> const std::unordered_map<std::string, TestSuite>&
         {
-            return allTests;
+            return suites;
         }
 
+/*
         // get a list of test indices filtered by the query
         [[nodiscard]]
         auto FilterTests(const Query& query) const
@@ -348,7 +478,8 @@ namespace impl
             tests.reserve(allTests.size());
             QueryError error; // created in advance for possible errors
 
-            if (query.tags.empty() && query.suites.empty() && query.excTags.empty())
+            if (query.tags.empty() && query.suites.empty() &&
+                query.excTags.empty() && query.excSuites.empty())
             {
                 tests.resize(allTests.size());
                 std::iota(tests.begin(), tests.end(), 0);
@@ -391,10 +522,20 @@ namespace impl
                 return tests;
             return std::unexpected(error);
         }
+*/
 
         // run tests with optional filtering
-        auto Run(const int argc, char** argv) -> void
+        auto Run(const auto& query) -> void
         {
+            // iterate over suites that are in query.suites
+            for (const auto& [suiteName, suite] : suites
+                | std::views::filter([&](const std::string_view sv)
+                    {return std::ranges::contains(query.suites, suiteName);}))
+            {
+
+            }
+
+            /*
             const auto query = ParseArgs(argc, argv);
             if (const auto res = FilterTests(query))
             {
@@ -442,9 +583,9 @@ namespace impl
                         std::println("{}- {}", fmt::indent, tag);
                 }
             }
+            */
         }
 
-    private:
         // parse cli into a query
         [[nodiscard]]
         auto ParseArgs(int argc, char** argv) -> Query
@@ -452,10 +593,11 @@ namespace impl
             return Query{};
         }
 
-        // try to run a function
+    private:
+        // try to run a function from TestCase
         template<typename T>
         requires (std::same_as<T, void> || std::same_as<std::decay_t<T>, nm::Result>)
-        auto TryRunFunc(
+        auto TryRunTestFunc(
             const std::string& testName,
             const FuncType funcType,
             const std::function<T()>& func) -> TestStatus
@@ -501,10 +643,43 @@ namespace impl
             }
         }
 
+        // try to run a function from a suite
+        template<typename T>
+        requires (std::same_as<std::decay_t<T>, TestCase> ||
+                  std::same_as<std::decay_t<T>, TestSuite>)
+        auto TryRunFunc(const T& object, const FuncType funcType) -> std::optional<TestStatus>
+        {
+            if constexpr (std::is_same_v<std::decay_t<T>, TestCase>)
+            {
+                switch (funcType)
+                {
+                    case FuncType::Setup:
+                    {
+                        if (object.)
+                    }
+                    break;
+
+                    case FuncType::Teardown:
+                    {
+
+                    }
+                    break;
+
+                    case FuncType::Test:
+                    {
+
+                    }
+                    break;
+                }
+            }
+            else
+            {
+
+            }
+        }
+
     private:
-        std::unordered_map<std::string, std::vector<std::size_t>> tagIndex;
-        std::unordered_map<std::string, std::vector<std::size_t>> suiteIndex;
-        std::vector<TestCase> allTests;
+        std::unordered_map<std::string, TestSuite> suites;
     };
 
     // get static Registry instance
@@ -524,19 +699,16 @@ export namespace nm
         const std::initializer_list<std::string>& tags =
               std::initializer_list<std::string>()) -> impl::Registry::TestCase&
     {
-        return impl::GetRegistry().AddTest(impl::Registry::TestCase{name}, suite, tags);
+        return impl::GetRegistry().AddTest(suite, name, impl::Registry::TestCase(tags));
     }
 
     // add a suite with any number of tests
-    //template<typename T, typename... Ts>
-    //requires (std::same_as<std::decay_t<T>, impl::Registry::TestCase> &&
-    //         (std::same_as<std::decay_t<Ts>, std::decay_t<T>> && ...))
-    //auto Suite(const std::string& name, T&& firstTest, Ts&&... rest) -> void
-    //{
-    //    using namespace impl;
-    //    GetRegistry().AddTest(Registry::TestCase{std::forward<Registry::TestCase>(firstTest)});
-    //    (GetRegistry().AddTest(std::forward<Registry::TestCase>(rest)), ...);
-    //}
+    auto Suite(const std::string& name, const std::initializer_list<std::string>& tags =
+              std::initializer_list<std::string>()) -> void
+    {
+        using namespace impl;
+        GetRegistry().AddSuite(name, impl::Registry::TestSuite(tags));
+    }
 
     // get the registry
     auto Registry() -> impl::Registry&
@@ -547,7 +719,8 @@ export namespace nm
     // run all tests with optional filtering
     auto Run(const int argc = 1, char** argv = nullptr) -> void
     {
-        impl::GetRegistry().Run(argc, argv);
+        const auto query = impl::GetRegistry().ParseArgs(argc, argv);
+        impl::GetRegistry().Run(query);
     }
 }
 

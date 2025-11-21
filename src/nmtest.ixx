@@ -13,7 +13,6 @@ module;
 #include <iostream>
 #include <numeric>
 #include <print>
-#include <set>
 
 export module nm;
 
@@ -363,7 +362,7 @@ namespace impl
                 {
                     curSuite = suiteIndex.at(suite);
                 }
-                catch (const std::exception& e)
+                catch (const std::exception&)
                 {
                     error.suites.push_back(suite);
                     continue;
@@ -376,7 +375,7 @@ namespace impl
                     {
                         curTag = tagIndex.at(tag);
                     }
-                    catch (const std::exception& e)
+                    catch (const std::exception&)
                     {
                         error.tags.push_back(tag);
                         continue;
@@ -525,9 +524,19 @@ export namespace nm
         const std::initializer_list<std::string>& tags =
               std::initializer_list<std::string>()) -> impl::Registry::TestCase&
     {
-        auto r = impl::GetRegistry();
         return impl::GetRegistry().AddTest(impl::Registry::TestCase{name}, suite, tags);
     }
+
+    // add a suite with any number of tests
+    //template<typename T, typename... Ts>
+    //requires (std::same_as<std::decay_t<T>, impl::Registry::TestCase> &&
+    //         (std::same_as<std::decay_t<Ts>, std::decay_t<T>> && ...))
+    //auto Suite(const std::string& name, T&& firstTest, Ts&&... rest) -> void
+    //{
+    //    using namespace impl;
+    //    GetRegistry().AddTest(Registry::TestCase{std::forward<Registry::TestCase>(firstTest)});
+    //    (GetRegistry().AddTest(std::forward<Registry::TestCase>(rest)), ...);
+    //}
 
     // get the registry
     auto Registry() -> impl::Registry&

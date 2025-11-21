@@ -11,7 +11,6 @@ module;
 #include <source_location>
 #include <filesystem>
 #include <iostream>
-#include <numeric>
 #include <print>
 #include <ranges>
 
@@ -76,6 +75,16 @@ export namespace nm
     };
 }
 
+namespace impl
+{
+    enum class FuncType : std::uint8_t
+    {
+        Setup,
+        Test,
+        Teardown
+    };
+}
+
 namespace fmt
 {
     const auto indent     = "         "; // "         " log prefix
@@ -98,16 +107,21 @@ namespace fmt
 
     // print an error like "[! ERROR] Test 1: Setup function has thrown an unhandled exception 'whatever'"
     constexpr auto ReportException(
-        const std::string& funcType,
-        const std::string& testName,
+        impl::FuncType type,
+        const std::string& name,
         const std::string& what = std::string()) -> void
     {
+        const auto funcType = (type == impl::FuncType::Setup) ?
+            "Setup" : (type == impl::FuncType::Teardown) ?
+            "Teardown" :
+            "Test";
+
         if (what.empty())
             std::println("{} {}: {} function has thrown an unhandled exception",
-                fmt::error, testName, funcType);
+                fmt::error, name, funcType);
         else
             std::println("{} {}: {} function has thrown an unhandled exception '{}'",
-                fmt::error, testName, funcType, what);
+                fmt::error, name, funcType, what);
     };
 
     constexpr auto ReportResult(const std::string& testName, const nm::Result& res) -> void
@@ -242,10 +256,6 @@ namespace impl
 
     // REGISTRY ---------------------------------------------------------------
 
-    using SetupFunc = std::function<void()>;
-    using TeardownFunc = std::function<void()>;
-    using TestFunc = std::function<nm::Result()>;
-
     template<typename K, typename V>
     using VectorPair = std::vector<std::pair<K, V>>;
 
@@ -258,49 +268,51 @@ namespace impl
         public:
             TestBase(
                 const std::initializer_list<std::string>& tags = std::initializer_list<std::string>(),
-                SetupFunc  setup = SetupFunc(), TeardownFunc  teardown = TeardownFunc())
+                std::function<void()>  setup = std::function<void()>(), std::function<void()>  teardown = std::function<void()>())
                     : setup(std::move(setup)), teardown(std::move(teardown)), tags(tags) {}
+
+            virtual ~TestBase() = default;
 
             // get the setup function
             [[nodiscard]]
-            auto Setup() const noexcept -> const SetupFunc&
+            virtual auto Setup() const noexcept -> const std::function<void()>&
             {
                 return setup;
             }
 
             // get the teardown function
             [[nodiscard]]
-            auto Teardown() const noexcept -> const TeardownFunc&
+            virtual auto Teardown() const noexcept -> const std::function<void()>&
             {
                 return teardown;
             }
 
             // get tags
             [[nodiscard]]
-            auto Tags() const noexcept -> const std::vector<std::string>&
+            virtual auto Tags() const noexcept -> const std::vector<std::string>&
             {
                 return tags;
             }
 
         protected:
-            SetupFunc setup;
-            TeardownFunc teardown;
+            std::function<void()> setup;
+            std::function<void()> teardown;
             std::vector<std::string> tags;
         };
 
         class TestCase final : public TestBase
         {
-            friend Registry;
-
         public:
             TestCase(
                 const std::initializer_list<std::string> tags = std::initializer_list<std::string>(),
-                SetupFunc setup = SetupFunc(), TeardownFunc teardown = TeardownFunc(),
-                TestFunc func = TestFunc())
+                std::function<void()> setup = std::function<void()>(), std::function<void()> teardown = std::function<void()>(),
+                std::function<nm::Result()> func = std::function<nm::Result()>())
                     : TestBase(tags, std::move(setup), std::move(teardown)), func(std::move(func)) {}
 
+            ~TestCase() override = default;
+
             // add the test function
-            auto Func(const TestFunc& fn) -> TestCase&
+            auto Func(const std::function<nm::Result()>& fn) -> TestCase&
             {
                 if (fn) func = fn;
                 return *this;
@@ -308,20 +320,20 @@ namespace impl
 
             // get the test function
             [[nodiscard]]
-            auto Func() const -> const TestFunc&
+            auto Func() const -> const std::function<nm::Result()>&
             {
                 return func;
             }
 
             // add the setup function
-            auto Setup(const SetupFunc& fn) -> TestCase&
+            auto Setup(const std::function<void()>& fn) -> TestCase&
             {
                 if (fn) setup = fn;
                 return *this;
             }
 
             // add the setup function
-            auto Teardown(const TeardownFunc& fn) -> TestCase&
+            auto Teardown(const std::function<void()>& fn) -> TestCase&
             {
                 if (fn) teardown = fn;
                 return *this;
@@ -337,7 +349,7 @@ namespace impl
             }
 
         private:
-            TestFunc func;
+            std::function<nm::Result()> func;
         };
 
         class TestSuite final : public TestBase
@@ -345,18 +357,20 @@ namespace impl
         public:
             TestSuite(
                 const std::initializer_list<std::string> tags = std::initializer_list<std::string>(),
-                SetupFunc setup = SetupFunc(), TeardownFunc teardown = TeardownFunc())
+                std::function<void()> setup = std::function<void()>(), std::function<void()> teardown = std::function<void()>())
                     : TestBase(tags, std::move(setup), std::move(teardown)) {}
 
+            ~TestSuite() override = default;
+
             // add the setup function
-            auto Setup(const SetupFunc& fn) -> TestSuite&
+            auto Setup(const std::function<void()>& fn) -> TestSuite&
             {
                 if (fn) setup = fn;
                 return *this;
             }
 
             // add the setup function
-            auto Teardown(const TeardownFunc& fn) -> TestSuite&
+            auto Teardown(const std::function<void()>& fn) -> TestSuite&
             {
                 if (fn) teardown = fn;
                 return *this;
@@ -403,24 +417,14 @@ namespace impl
             std::vector<std::string> suites;
         };
 
-        enum class FuncType : std::uint8_t
-        {
-            Setup,
-            Test,
-            Teardown
-        };
-
         enum class TestStatus : std::uint8_t
         {
             Pass,
             Fail,
-            Error,
-            None    // status returned by setup and teardown functions
+            Error
         };
 
     public:
-        Registry() { std::println("Registry was created"); }
-
         // register a suite
         auto AddSuite(const std::string& name, const TestSuite& suite) -> TestSuite&
         {
@@ -505,10 +509,15 @@ namespace impl
         {
             // iterate over suites that are in query.suites
             for (const auto& [suiteName, suite] : suites
-                | std::views::filter([&](const std::string_view sv)
-                    {return std::ranges::contains(query.suites, suiteName);}))
+                | std::views::all
+                | std::views::filter([&](const auto& pair)
+                    {return std::ranges::contains(query.suites, pair.first);}))
             {
+                TryInvoke(suiteName, &suite, FuncType::Setup);
 
+                // filter by tag and run
+
+                TryInvoke(suiteName, &suite, FuncType::Teardown);
             }
 
             /*
@@ -570,88 +579,85 @@ namespace impl
         }
 
     private:
-        // try to run a function from TestCase
-        template<typename T>
-        requires (std::same_as<T, void> || std::same_as<std::decay_t<T>, nm::Result>)
-        auto TryRunTestFunc(
-            const std::string& testName,
-            const FuncType funcType,
-            const std::function<T()>& func) -> TestStatus
+        // try to run a function from a suite
+        static auto TryInvoke(
+            const std::string& name,
+            const TestBase* testOrSuite,
+            const FuncType funcType) -> std::optional<TestStatus>
         {
-            if (!func)
-            {
-                if (funcType == FuncType::Test)
-                {
-                    fmt::ReportMissingTest(testName);
-                    return TestStatus::Error;
-                }
-                return TestStatus::None;
-            }
-
-            const std::string type =
-                funcType == FuncType::Setup ? "Setup" :
-                funcType == FuncType::Test  ? "Test"  : "Teardown";
-
             try
             {
-                if constexpr (std::same_as<std::decay_t<T>, nm::Result>)
+                if (const auto* suite = dynamic_cast<const TestSuite*>(testOrSuite))
                 {
-                    const auto res = func();
-                    fmt::ReportResult(testName, res);
+                    switch (funcType)
+                    {
+                        case FuncType::Setup:
+                        {
+                            if (suite->TestBase::Setup())
+                                suite->TestBase::Setup()();
+                        }
+                        break;
 
-                    if (res.Success())
-                        return TestStatus::Pass;
-                    return TestStatus::Fail;
+                        case FuncType::Teardown:
+                        {
+                            if (suite->TestBase::Teardown())
+                                suite->TestBase::Teardown()();
+                        }
+                        break;
+
+                        default: break;
+                    }
+
+                    return std::nullopt;
                 }
 
-                func();
-                return TestStatus::None;
+                if (const auto* test = dynamic_cast<const TestCase*>(testOrSuite))
+                {
+                    switch (funcType)
+                    {
+                        case FuncType::Setup:
+                        {
+                            if (test->TestBase::Setup())
+                                test->TestBase::Setup()();
+                            return std::nullopt;
+                        }
+
+                        case FuncType::Teardown:
+                        {
+                            if (test->TestBase::Teardown())
+                                test->TestBase::Teardown()();
+                            return std::nullopt;
+                        }
+
+                        case FuncType::Test:
+                        {
+                            if (!test->Func())
+                            {
+                                fmt::ReportMissingTest(name);
+                                return TestStatus::Error;
+                            }
+
+                            const auto res = test->Func()();
+                            fmt::ReportResult(name, res);
+                            return res ? TestStatus::Pass : TestStatus::Fail;
+                        }
+                    }
+                }
+
+                return TestStatus::Error;
             }
             catch (const std::exception& e)
             {
-                fmt::ReportException(type, testName, e.what());
+                fmt::ReportException(funcType, name, e.what());
                 return TestStatus::Error;
             }
             catch (...)
             {
-                fmt::ReportException(type, testName);
+                fmt::ReportException(funcType, name);
                 return TestStatus::Error;
             }
-        }
 
-        // try to run a function from a suite
-        template<typename T>
-        requires (std::same_as<std::decay_t<T>, TestCase> ||
-                  std::same_as<std::decay_t<T>, TestSuite>)
-        auto TryRunFunc(const T& object, const FuncType funcType) -> std::optional<TestStatus>
-        {
-            if constexpr (std::is_same_v<std::decay_t<T>, TestCase>)
-            {
-                switch (funcType)
-                {
-                    case FuncType::Setup:
-                    {
-                        if (object.)
-                    }
-                    break;
 
-                    case FuncType::Teardown:
-                    {
-
-                    }
-                    break;
-
-                    case FuncType::Test:
-                    {
-
-                    }
-                    break;
-                }
-            }
-            else
-            {
-
-            }
         }
 
     private:

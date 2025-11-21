@@ -256,6 +256,11 @@ namespace impl
         class TestBase
         {
         public:
+            TestBase(
+                const std::initializer_list<std::string>& tags = std::initializer_list<std::string>(),
+                SetupFunc  setup = SetupFunc(), TeardownFunc  teardown = TeardownFunc())
+                    : setup(std::move(setup)), teardown(std::move(teardown)), tags(tags) {}
+
             // get the setup function
             [[nodiscard]]
             auto Setup() const noexcept -> const SetupFunc&
@@ -283,18 +288,16 @@ namespace impl
             std::vector<std::string> tags;
         };
 
-        class TestCase
+        class TestCase final : public TestBase
         {
             friend Registry;
 
         public:
             TestCase(
-                std::initializer_list<std::string> tags = std::initializer_list<std::string>(),
-                TestFunc func = TestFunc(),
-                SetupFunc setup = SetupFunc(),
-                TeardownFunc teardown = TeardownFunc())
-                    : setup(std::move(setup)), teardown(std::move(teardown)),
-                        func(std::move(func)), tags(tags) {}
+                const std::initializer_list<std::string> tags = std::initializer_list<std::string>(),
+                SetupFunc setup = SetupFunc(), TeardownFunc teardown = TeardownFunc(),
+                TestFunc func = TestFunc())
+                    : TestBase(tags, std::move(setup), std::move(teardown)), func(std::move(func)) {}
 
             // add the test function
             auto Func(const TestFunc& fn) -> TestCase&
@@ -334,20 +337,16 @@ namespace impl
             }
 
         private:
-            SetupFunc setup;
-            TeardownFunc teardown;
             TestFunc func;
-            std::vector<std::string> tags;
         };
 
-        class TestSuite
+        class TestSuite final : public TestBase
         {
         public:
             TestSuite(
-                const std::initializer_list<std::string>& tags = std::initializer_list<std::string>(),
-                SetupFunc  setup = SetupFunc(),
-                TeardownFunc  teardown = TeardownFunc())
-                    : setup(std::move(setup)), teardown(std::move(teardown)), tags(tags) {}
+                const std::initializer_list<std::string> tags = std::initializer_list<std::string>(),
+                SetupFunc setup = SetupFunc(), TeardownFunc teardown = TeardownFunc())
+                    : TestBase(tags, std::move(setup), std::move(teardown)) {}
 
             // add the setup function
             auto Setup(const SetupFunc& fn) -> TestSuite&
@@ -356,25 +355,11 @@ namespace impl
                 return *this;
             }
 
-            // get the setup function
-            [[nodiscard]]
-            auto Setup() const -> const SetupFunc&
-            {
-                return setup;
-            }
-
             // add the setup function
             auto Teardown(const TeardownFunc& fn) -> TestSuite&
             {
                 if (fn) teardown = fn;
                 return *this;
-            }
-
-            // get the setup function
-            [[nodiscard]]
-            auto Teardown() const -> const TeardownFunc&
-            {
-                return teardown;
             }
 
             // add a test
@@ -385,18 +370,12 @@ namespace impl
             }
 
             // add tags
-            auto Tags(const std::initializer_list<std::string>& tagList) -> void
+            auto Tags(const std::initializer_list<std::string>& tagList) -> TestSuite&
             {
                 tags.reserve(tags.size() + tagList.size());
                 for (const auto& tag : tagList)
                     tags.push_back(tag);
-            }
-
-            // get tags
-            [[nodiscard]]
-            auto Tags() -> std::vector<std::string>&
-            {
-                return tags;
+                return *this;
             }
 
             // get list of test indices
@@ -407,10 +386,7 @@ namespace impl
             }
 
         private:
-            SetupFunc setup;
-            TeardownFunc teardown;
             VectorPair<std::string, TestCase> tests;
-            std::vector<std::string> tags;
         };
 
         // query to the registry for filtering

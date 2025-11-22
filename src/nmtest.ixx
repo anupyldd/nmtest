@@ -256,9 +256,6 @@ namespace impl
 
     // REGISTRY ---------------------------------------------------------------
 
-    template<typename K, typename V>
-    using VectorPair = std::vector<std::pair<K, V>>;
-
     class Registry
     {
     public:
@@ -394,13 +391,13 @@ namespace impl
 
             // get list of test indices
             [[nodiscard]]
-            auto Tests() const -> const VectorPair<std::string, TestCase>&
+            auto Tests() const -> const std::vector<std::pair<std::string, TestCase>>&
             {
                 return tests;
             }
 
         private:
-            VectorPair<std::string, TestCase> tests;
+            std::vector<std::pair<std::string, TestCase>> tests;
         };
 
         // query to the registry for filtering
@@ -509,13 +506,27 @@ namespace impl
         {
             // iterate over suites that are in query.suites
             for (const auto& [suiteName, suite] : suites
-                | std::views::all
                 | std::views::filter([&](const auto& pair)
-                    {return std::ranges::contains(query.suites, pair.first);}))
+                {
+                    if (query.suites.empty()) return true;
+                    return std::ranges::contains(query.suites, pair.first);
+                }))
             {
                 TryInvoke(suiteName, &suite, FuncType::Setup);
 
-                // filter by tag and run
+                for (const auto& [testName, test] : suite.Tests()
+                    | std::views::filter([&](const auto& pair)
+                    {
+                        if (query.tags.empty()) return true;
+                        for (const auto& tag : pair.second.TestBase::Tags())
+                            if (std::ranges::contains(query.tags, tag)) return true;
+                        return false;
+                    }))
+                {
+                    TryInvoke(testName, &test, FuncType::Setup);
+                    TryInvoke(testName, &test, FuncType::Test);
+                    TryInvoke(testName, &test, FuncType::Teardown);
+                }
 
                 TryInvoke(suiteName, &suite, FuncType::Teardown);
             }

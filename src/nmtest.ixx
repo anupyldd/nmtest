@@ -134,7 +134,7 @@ namespace fmt
         {
             std::println("{} {}: ", fail, testName);
             for (const auto& msg : res.Messages())
-                std::println("{} {}", indent, msg);
+                std::println("{} - {}", indent, msg);
         }
     }
 

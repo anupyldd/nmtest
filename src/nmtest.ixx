@@ -421,6 +421,14 @@ namespace impl
             Error
         };
 
+        struct Summary
+        {
+            int  total  = 0,
+                 passed = 0;
+            std::vector<std::string> failed,
+                                     errors;
+        };
+
     public:
         // register a suite
         auto AddSuite(const std::string& name, const TestSuite& suite) -> TestSuite&
@@ -504,6 +512,8 @@ namespace impl
         // run tests with optional filtering
         auto Run(const auto& query) -> void
         {
+            Summary summary;
+
             // iterate over suites that are in query.suites
             for (const auto& [suiteName, suite] : suites
                 | std::views::filter([&](const auto& pair)
@@ -512,7 +522,7 @@ namespace impl
                     return std::ranges::contains(query.suites, pair.first);
                 }))
             {
-                TryInvoke(suiteName, &suite, FuncType::Setup);
+                TryInvoke(suiteName, &suite, FuncType::Setup, summary);
 
                 for (const auto& [testName, test] : suite.Tests()
                     | std::views::filter([&](const auto& pair)
@@ -523,14 +533,15 @@ namespace impl
                         return false;
                     }))
                 {
-                    TryInvoke(testName, &test, FuncType::Setup);
-                    TryInvoke(testName, &test, FuncType::Test);
-                    TryInvoke(testName, &test, FuncType::Teardown);
+                    TryInvoke(testName, &test, FuncType::Setup,    summary);
+                    TryInvoke(testName, &test, FuncType::Test,     summary);
+                    TryInvoke(testName, &test, FuncType::Teardown, summary);
                 }
 
-                TryInvoke(suiteName, &suite, FuncType::Teardown);
+                TryInvoke(suiteName, &suite, FuncType::Teardown, summary);
             }
 
+            fmt::ReportSummary(summary.total, summary.passed, summary.failed, summary.errors);
             /*
             const auto query = ParseArgs(argc, argv);
             if (const auto res = FilterTests(query))
@@ -593,8 +604,9 @@ namespace impl
         // try to run a function from a suite
         static auto TryInvoke(
             const std::string& name,
-            const TestBase* testOrSuite,
-            const FuncType funcType) -> std::optional<TestStatus>
+            const TestBase*    testOrSuite,
+            const FuncType     funcType,
+                  Summary&     summary) -> std::optional<TestStatus>
         {
             try
             {
@@ -642,6 +654,8 @@ namespace impl
 
                         case FuncType::Test:
                         {
+                            ++summary.total;
+
                             if (!test->Func())
                             {
                                 fmt::ReportMissingTest(name);
@@ -650,7 +664,13 @@ namespace impl
 
                             const auto res = test->Func()();
                             fmt::ReportResult(name, res);
-                            return res ? TestStatus::Pass : TestStatus::Fail;
+                            if (res)
+                            {
+                                ++summary.passed;
+                                return TestStatus::Pass;
+                            }
+                            summary.failed.emplace_back(name);
+                            return TestStatus::Fail;
                         }
                     }
                 }
@@ -660,11 +680,13 @@ namespace impl
             catch (const std::exception& e)
             {
                 fmt::ReportException(funcType, name, e.what());
+                summary.errors.emplace_back(name);
                 return TestStatus::Error;
             }
             catch (...)
             {
                 fmt::ReportException(funcType, name);
+                summary.errors.emplace_back(name);
                 return TestStatus::Error;
             }
 

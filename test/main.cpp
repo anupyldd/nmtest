@@ -1,6 +1,8 @@
 #include <cassert>
 #include <print>
 
+#include "test_header.h"
+
 import nm;
 
 void TestLib();
@@ -27,64 +29,64 @@ void TestLib()
     std::println("--- [nm] testing started");
 
     std::println("--- --- [nm] assert testing started");
-
-    AssertSuccess(Equal(1.0f, 1.0f));
-    AssertSuccess(Equal(1.0, 1.0));
-    AssertSuccess(Equal(0.0f, 0.0f));
-    AssertSuccess(Equal(0.0, 0.0));
-
-    AssertFailure(Equal(1.0f, 2.0f));
-    AssertFailure(Equal(1.0, 2.0));
-
-    // small representable differences
-    AssertSuccess(Equal(1.0f, 1.0f + 1e-6f));
-    AssertFailure(Equal(1.0, 1.0 + 1e-12));
-
-    // slightly too large differences
-    AssertFailure(Equal(1.0f, 1.0f + 1e-3f));
-    AssertFailure(Equal(1.0, 1.0 + 1e-8));
-
-    // very small numbers
-    AssertSuccess(Equal(1e-40f, 2e-40f));
-    AssertSuccess(Equal(1e-320, 2e-320));
-    AssertFailure(Equal(1e-40f, 1e-30f));
-
-    // opposite signs but near zero
-    AssertFailure(Equal(1e-9f, -1e-9f));
-    AssertFailure(Equal(1e-2f, -1e-2f));
-
-    // large magnitude numbers
-    AssertSuccess(Equal(1e8f, 1e8f + 1.0f));
-    AssertFailure(Equal(1e8f, 1e8f + 1e4f));
-    AssertSuccess(Equal(1e16, 1e16 + 1.0));
-    AssertFailure(Equal(1e16, 1e16 + 1e8));
-
-    // nan and infinity
-    AssertSuccess(Equal(std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity()));
-    AssertFailure(Equal(std::numeric_limits<float>::infinity(), 1e30f));
-    AssertFailure(Equal(std::nanf(""), std::nanf("")));
-
-    AssertFailure(NotEqual(1, 1));
-    AssertSuccess(NotEqual(1, 2));
-    AssertSuccess(NotEqual(1.12, 1.1));
-
-    AssertSuccess(True(true));
-    AssertFailure(True(false));
-
-    AssertFailure(False(true));
-    AssertSuccess(False(false));
-
     {
-        constexpr auto a = 10;
-        const auto ptr = &a;
+        AssertSuccess(Equal(1.0f, 1.0f));
+        AssertSuccess(Equal(1.0, 1.0));
+        AssertSuccess(Equal(0.0f, 0.0f));
+        AssertSuccess(Equal(0.0, 0.0));
 
-        AssertSuccess(Null(nullptr));
-        AssertFailure(Null(ptr));
+        AssertFailure(Equal(1.0f, 2.0f));
+        AssertFailure(Equal(1.0, 2.0));
 
-        AssertSuccess(NotNull(ptr));
-        AssertFailure(NotNull(nullptr));
+        // small representable differences
+        AssertSuccess(Equal(1.0f, 1.0f + 1e-6f));
+        AssertFailure(Equal(1.0, 1.0 + 1e-12));
+
+        // slightly too large differences
+        AssertFailure(Equal(1.0f, 1.0f + 1e-3f));
+        AssertFailure(Equal(1.0, 1.0 + 1e-8));
+
+        // very small numbers
+        AssertSuccess(Equal(1e-40f, 2e-40f));
+        AssertSuccess(Equal(1e-320, 2e-320));
+        AssertFailure(Equal(1e-40f, 1e-30f));
+
+        // opposite signs but near zero
+        AssertFailure(Equal(1e-9f, -1e-9f));
+        AssertFailure(Equal(1e-2f, -1e-2f));
+
+        // large magnitude numbers
+        AssertSuccess(Equal(1e8f, 1e8f + 1.0f));
+        AssertFailure(Equal(1e8f, 1e8f + 1e4f));
+        AssertSuccess(Equal(1e16, 1e16 + 1.0));
+        AssertFailure(Equal(1e16, 1e16 + 1e8));
+
+        // nan and infinity
+        AssertSuccess(Equal(std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity()));
+        AssertFailure(Equal(std::numeric_limits<float>::infinity(), 1e30f));
+        AssertFailure(Equal(std::nanf(""), std::nanf("")));
+
+        AssertFailure(NotEqual(1, 1));
+        AssertSuccess(NotEqual(1, 2));
+        AssertSuccess(NotEqual(1.12, 1.1));
+
+        AssertSuccess(True(true));
+        AssertFailure(True(false));
+
+        AssertFailure(False(true));
+        AssertSuccess(False(false));
+
+        {
+            constexpr auto a = 10;
+            const auto ptr = &a;
+
+            AssertSuccess(Null(nullptr));
+            AssertFailure(Null(ptr));
+
+            AssertSuccess(NotNull(ptr));
+            AssertFailure(NotNull(nullptr));
+        }
     }
-
     std::println("--- --- [nm] assert testing finished successfully");
 
     std::println("--- --- [nm] test testing started");

@@ -102,7 +102,7 @@ namespace fmt
         const T& actual,
         const T& expected) -> std::string
     {
-        return std::format("{}({} : {})", type, actual, expected);
+        return std::format("{}({}:{})", type, actual, expected);
     }
 
     // print an error like "[! ERROR] Test 1: Setup function has thrown an unhandled exception 'whatever'"
@@ -495,55 +495,6 @@ namespace impl
             }
 
             fmt::ReportSummary(summary.total, summary.passed, summary.failed, summary.errors);
-            /*
-            const auto query = ParseArgs(argc, argv);
-            if (const auto res = FilterTests(query))
-            {
-                const auto& tests = res.value();
-                auto total  = 0,
-                     passed = 0;
-
-                auto failed = std::vector<std::string>();
-                auto errors = std::vector<std::string>();
-
-                for (const auto testIndex : tests)
-                {
-                    const auto& test = allTests.at(testIndex);
-
-                    TryRunFunc(test.name, FuncType::Setup, test.setup);
-
-                    switch (TryRunFunc(test.name, FuncType::Test, test.func))
-                    {
-                        case TestStatus::Pass:  ++passed; break;
-                        case TestStatus::Fail:  failed.push_back(test.name); break;
-                        case TestStatus::Error: errors.push_back(test.name);  break;
-                        default: ++total;
-                    }
-
-                    TryRunFunc(test.name, FuncType::Teardown, test.teardown);
-                }
-
-                fmt::ReportSummary(total, passed, failed, errors);
-            }
-            else
-            {
-                std::println("{} Errors detected in the query", fmt::error);
-
-                if (const auto& suites = res.error().suites; suites.empty())
-                {
-                    std::println("{} Missing suites:", fmt::indent);
-                    for (const auto& suite : suites)
-                        std::println("{}- {}", fmt::indent, suite);
-                }
-
-                if (const auto& tags = res.error().suites; tags.empty())
-                {
-                    std::println("{} Missing suites:", fmt::indent);
-                    for (const auto& tag : tags)
-                        std::println("{}- {}", fmt::indent, tag);
-                }
-            }
-            */
         }
 
         // parse cli into a query

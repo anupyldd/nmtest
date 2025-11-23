@@ -13,5 +13,8 @@ target_sources(${LIB_NAME}
         src/nmtest.ixx
 )
 
-add_executable(${PROJECT_NAME} test/main.cpp)
+add_executable(${PROJECT_NAME}
+        test/main.cpp
+        test/test_header.h
+        test/test_source.cpp)
 target_link_libraries(${PROJECT_NAME} PRIVATE ${LIB_NAME})

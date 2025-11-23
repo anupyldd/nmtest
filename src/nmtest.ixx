@@ -23,8 +23,8 @@ export namespace nm
     public:
         Result(
             const bool success = true,
-            std::string type = std::string(),       // type of assert (e.g. "Equal")
-            std::string message = std::string(),    // custom message provided by the user
+                  std::string type = std::string(),       // type of assert (e.g. "Equal")
+                  std::string message = std::string(),    // custom message provided by the user
             const std::source_location& loc = std::source_location())
             : success(success)
         {
@@ -107,7 +107,7 @@ namespace fmt
 
     // print an error like "[! ERROR] Test 1: Setup function has thrown an unhandled exception 'whatever'"
     constexpr auto ReportException(
-        impl::FuncType type,
+        const impl::FuncType type,
         const std::string& name,
         const std::string& what = std::string()) -> void
     {
@@ -124,7 +124,9 @@ namespace fmt
                 fmt::error, name, funcType, what);
     };
 
-    constexpr auto ReportResult(const std::string& testName, const nm::Result& res) -> void
+    constexpr auto ReportResult(
+        const std::string& testName,
+        const nm::Result& res) -> void
     {
         if (res.Success())
         {
@@ -265,7 +267,8 @@ namespace impl
         public:
             TestBase(
                 const std::initializer_list<std::string>& tags = std::initializer_list<std::string>(),
-                std::function<void()>  setup = std::function<void()>(), std::function<void()>  teardown = std::function<void()>())
+                      std::function<void()>  setup = std::function<void()>(),
+                      std::function<void()>  teardown = std::function<void()>())
                     : setup(std::move(setup)), teardown(std::move(teardown)), tags(tags) {}
 
             virtual ~TestBase() = default;
@@ -302,8 +305,9 @@ namespace impl
         public:
             TestCase(
                 const std::initializer_list<std::string> tags = std::initializer_list<std::string>(),
-                std::function<void()> setup = std::function<void()>(), std::function<void()> teardown = std::function<void()>(),
-                std::function<nm::Result()> func = std::function<nm::Result()>())
+                      std::function<void()> setup = std::function<void()>(),
+                      std::function<void()> teardown = std::function<void()>(),
+                      std::function<nm::Result()> func = std::function<nm::Result()>())
                     : TestBase(tags, std::move(setup), std::move(teardown)), func(std::move(func)) {}
 
             ~TestCase() override = default;
@@ -354,7 +358,8 @@ namespace impl
         public:
             TestSuite(
                 const std::initializer_list<std::string> tags = std::initializer_list<std::string>(),
-                std::function<void()> setup = std::function<void()>(), std::function<void()> teardown = std::function<void()>())
+                      std::function<void()> setup = std::function<void()>(),
+                      std::function<void()> teardown = std::function<void()>())
                     : TestBase(tags, std::move(setup), std::move(teardown)) {}
 
             ~TestSuite() override = default;
@@ -374,7 +379,9 @@ namespace impl
             }
 
             // add a test
-            auto Add(const std::string& name, const TestCase& test) -> TestCase&
+            auto Add(
+                const std::string& name,
+                const TestCase& test) -> TestCase&
             {
                 tests.emplace_back(name, test);
                 return tests.back().second;
@@ -431,7 +438,9 @@ namespace impl
 
     public:
         // register a suite
-        auto AddSuite(const std::string& name, const TestSuite& suite) -> TestSuite&
+        auto AddSuite(
+            const std::string& name,
+            const TestSuite& suite) -> TestSuite&
         {
             suites[name] = suite;
             return suites[name];
@@ -452,62 +461,6 @@ namespace impl
         {
             return suites;
         }
-
-/*
-        // get a list of test indices filtered by the query
-        [[nodiscard]]
-        auto FilterTests(const Query& query) const
-            -> std::expected<std::vector<std::size_t>, QueryError>
-        {
-            std::vector<std::size_t> tests;
-            tests.reserve(allTests.size());
-            QueryError error; // created in advance for possible errors
-
-            if (query.tags.empty() && query.suites.empty() &&
-                query.excTags.empty() && query.excSuites.empty())
-            {
-                tests.resize(allTests.size());
-                std::iota(tests.begin(), tests.end(), 0);
-                return tests;
-            }
-
-            for (const auto& suite : query.suites)
-            {
-                std::vector<std::size_t> curSuite;
-                try
-                {
-                    curSuite = suiteIndex.at(suite);
-                }
-                catch (const std::exception&)
-                {
-                    error.suites.push_back(suite);
-                    continue;
-                }
-
-                for (const auto& tag : query.tags)
-                {
-                    std::vector<std::size_t> curTag;
-                    try
-                    {
-                        curTag = tagIndex.at(tag);
-                    }
-                    catch (const std::exception&)
-                    {
-                        error.tags.push_back(tag);
-                        continue;
-                    }
-
-                    std::vector<std::size_t> intersect;
-                    std::ranges::set_intersection(curSuite, curTag, std::back_inserter(intersect));
-                    tests.insert_range(tests.end(), intersect);
-                }
-            }
-
-            if (error.suites.empty() && error.tags.empty())
-                return tests;
-            return std::unexpected(error);
-        }
-*/
 
         // run tests with optional filtering
         auto Run(const auto& query) -> void
@@ -773,8 +726,8 @@ export namespace nm
     template<typename F, typename Tuple = std::tuple<>>
     [[nodiscard]]
     constexpr auto Throws(
-        F&& func,
-        Tuple&& argsTuple = {},
+              F&& func,
+              Tuple&& argsTuple = {},
         const std::string& message = std::string(),
         const std::source_location loc = std::source_location::current()) -> Result
     {
@@ -786,8 +739,8 @@ export namespace nm
     template<typename F, typename Tuple = std::tuple<>>
     [[nodiscard]]
     constexpr auto DoesNotThrow(
-        F&& func,
-        Tuple&& argsTuple = {},
+              F&& func,
+              Tuple&& argsTuple = {},
         const std::string& message = std::string(),
         const std::source_location loc = std::source_location::current()) -> Result
     {
@@ -799,7 +752,7 @@ export namespace nm
     template<typename T>
     [[nodiscard]]
     constexpr auto Null(
-        T val,
+              T val,
         const std::string& message = std::string(),
         const std::source_location loc = std::source_location::current()) -> Result
     {
@@ -810,7 +763,7 @@ export namespace nm
     template<typename T>
     [[nodiscard]]
     constexpr auto NotNull(
-        T val,
+              T val,
         const std::string& message = std::string(),
         const std::source_location loc = std::source_location::current()) -> Result
     {
@@ -821,7 +774,7 @@ export namespace nm
     template<typename T>
     [[nodiscard]]
     constexpr auto True(
-        T val,
+              T val,
         const std::string& message = std::string(),
         const std::source_location loc = std::source_location::current()) -> Result
     {
@@ -832,7 +785,7 @@ export namespace nm
     template<typename T>
     [[nodiscard]]
     constexpr auto False(
-        T val,
+              T val,
         const std::string& message = std::string(),
         const std::source_location loc = std::source_location::current()) -> Result
     {

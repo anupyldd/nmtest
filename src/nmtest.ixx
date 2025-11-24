@@ -266,7 +266,7 @@ namespace impl
         {
         public:
             TestBase(
-                const std::initializer_list<std::string>& tags = std::initializer_list<std::string>(),
+                const std::vector<std::string>& tags = std::vector<std::string>(),
                       std::function<void()>  setup = std::function<void()>(),
                       std::function<void()>  teardown = std::function<void()>())
                     : setup(std::move(setup)), teardown(std::move(teardown)), tags(tags) {}
@@ -304,10 +304,10 @@ namespace impl
         {
         public:
             TestCase(
-                const std::initializer_list<std::string> tags = std::initializer_list<std::string>(),
+                const std::vector<std::string>& tags = std::vector<std::string>(),
+                      std::function<nm::Result()> func = std::function<nm::Result()>(),
                       std::function<void()> setup = std::function<void()>(),
-                      std::function<void()> teardown = std::function<void()>(),
-                      std::function<nm::Result()> func = std::function<nm::Result()>())
+                      std::function<void()> teardown = std::function<void()>())
                     : TestBase(tags, std::move(setup), std::move(teardown)), func(std::move(func)) {}
 
             ~TestCase() override = default;
@@ -357,7 +357,7 @@ namespace impl
         {
         public:
             TestSuite(
-                const std::initializer_list<std::string> tags = std::initializer_list<std::string>(),
+                const std::vector<std::string>& tags = std::vector<std::string>(),
                       std::function<void()> setup = std::function<void()>(),
                       std::function<void()> teardown = std::function<void()>())
                     : TestBase(tags, std::move(setup), std::move(teardown)) {}
@@ -387,6 +387,13 @@ namespace impl
                 return tests.back().second;
             }
 
+            // add an empty test (without test fn)
+            auto Add(const std::string& name) -> TestCase&
+            {
+                tests.emplace_back(name, TestCase{});
+                return tests.back().second;
+            }
+
             // add tags
             auto Tags(const std::initializer_list<std::string>& tagList) -> TestSuite&
             {
@@ -399,6 +406,13 @@ namespace impl
             // get list of test indices
             [[nodiscard]]
             auto Tests() const -> const std::vector<std::pair<std::string, TestCase>>&
+            {
+                return tests;
+            }
+
+            // get list of test indices
+            [[nodiscard]]
+            auto Tests() -> std::vector<std::pair<std::string, TestCase>>&
             {
                 return tests;
             }
@@ -504,6 +518,54 @@ namespace impl
             return Query{};
         }
 
+        // get specific suite. create if not found
+        [[nodiscard]]
+        auto GetSuite(const std::string& name) -> TestSuite&
+        {
+            return suites[name];
+        }
+
+        // get specific test. create if not found
+        [[nodiscard]]
+        auto GetTest(
+            const std::string& suiteName,
+            const std::string& testName) -> TestCase&
+        {
+            auto& suite = GetSuite(suiteName);
+
+            for (auto& [name, test] : suite.Tests())
+            {
+                if (name == testName) return test;
+            }
+
+            auto& newTest = suite.Add(testName, TestCase{});
+            return newTest;
+        }
+
+        // set last test
+        auto LastTest(TestCase* test) -> void
+        {
+            lastTest = test;
+        }
+        // get last test
+        [[nodiscard]]
+        auto LastTest() const -> TestCase*
+        {
+            return lastTest;
+        }
+
+        // set last suite
+        auto LastSuite(TestSuite* suite) -> void
+        {
+            lastSuite = suite;
+        }
+        // get last suite
+        [[nodiscard]]
+        auto LastSuite() const -> TestSuite*
+        {
+            return lastSuite;
+        }
+
     private:
         // try to run a function from a suite
         static auto TryInvoke(
@@ -599,6 +661,8 @@ namespace impl
 
     private:
         std::unordered_map<std::string, TestSuite> suites;
+        TestSuite* lastSuite = nullptr;
+        TestCase*  lastTest  = nullptr;
     };
 
     // get static Registry instance
@@ -611,6 +675,85 @@ namespace impl
 
 export namespace nm
 {
+    struct SuiteName
+    {
+        std::string name;
+        SuiteName(const std::string& name) : name(name)
+        {
+            using namespace impl;
+            GetRegistry().LastSuite(&(GetRegistry().GetSuite(name)));
+            std::println("!!!!! created suite name");
+        }
+        SuiteName& operator = (const std::string& rhs)
+        {
+            std::println("!!!!! created suite name");
+            name = rhs;
+            return *this;
+        }
+    };
+    struct TestName
+    {
+        std::string name;
+        TestName(const std::string& name) : name(name)
+        {
+            using namespace impl;
+            GetRegistry().LastTest(&(GetRegistry().LastSuite()->Add(name)));
+            std::println("!!!!! created test name");
+        }
+        TestName& operator = (const std::string& rhs)
+        {
+            std::println("!!!!! created test name");
+            name = rhs;
+            return *this;
+        }
+    };
+    struct TestFunc
+    {
+        std::function<nm::Result()> func;
+        TestFunc(const std::function<nm::Result()>& func)
+        {
+            using namespace impl;
+            GetRegistry().LastTest()->Func(func);
+            std::println("!!!!! created test func");
+        }
+        TestFunc& operator = (const std::function<nm::Result()>& rhs)
+        {
+            std::println("!!!!! created test func");
+            func = rhs;
+            return *this;
+        }
+    };
+    struct TestS
+    {
+        SuiteName suite;
+        TestName test;
+        TestFunc func;
+    };
+
+
+
+    struct RawTest
+    {
+        std::string name, suite;
+        std::vector<std::string> tags;
+        std::function<nm::Result()> func;
+    };
+    struct TestStructBase
+    {
+        TestStructBase(RawTest) {}
+        std::string name, suite;
+        std::vector<std::string> tags;
+        std::function<nm::Result()> func;
+    };
+
+    struct TestStruct
+    {
+        TestStruct(RawTest rt)
+        {
+            impl::GetRegistry().AddTest(rt.suite, rt.name, impl::Registry::TestCase(rt.tags,rt.func));
+        }
+    };
+
     // register a test function
     auto Test(
         const std::string& suite,

@@ -29,11 +29,18 @@ using namespace nm;
     // }
 // };
 
-inline TestS s{
+/*s{
     .suite = "another file",
     .test = "test class",
     .func = []{return Equal(1,2);}
+};*/
+
+inline TestS s{
+    "another file",
+    "test class 1",
+    []{return Equal(10,20);}
 };
+
 
 //static auto a = []{Test("TestClass", "from another file").Func([]{return Equal(1,2);});}();
 //templates create instances of objects based on type

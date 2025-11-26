@@ -199,6 +199,10 @@ namespace types
 
 namespace impl
 {
+    constinit auto FloatEpsilon  = 1.192092896e-07F;
+    constinit auto FloatMin      = 1.175494351e-38F;
+    constinit auto DoubleEpsilon = 2.2204460492503131e-016;
+    constinit auto DoubleMin     = 2.2250738585072014e-308;
 
     // compares floating point numbers for equality
     template<types::FloatingPoint T>
@@ -207,8 +211,8 @@ namespace impl
     {
         // different epsilon for float and double
         constexpr bool isFloat = std::is_same_v<T, float_t>;
-        const auto epsilon = isFloat ? 128 * FLT_EPSILON : 128 * DBL_EPSILON;
-        const auto absTh  = isFloat ? FLT_MIN : DBL_MIN;
+        const auto epsilon = isFloat ? 128 * FloatEpsilon : 128 * DoubleEpsilon;
+        const auto absTh  = isFloat ? FloatMin : DoubleMin;
 
         if (a == b) return true;
 
@@ -671,88 +675,98 @@ namespace impl
         static Registry reg;
         return reg;
     }
+
+    // ------------------------------------------------------------------------
+
+    template<std::size_t N>
+    struct StructuralString
+    {
+        constexpr StructuralString(const char (&str)[N])
+        {
+            std::copy_n(str, N, string);
+        }
+
+        constexpr operator std::string_view () const { return string; }
+        constexpr operator std::string () const { return string; }
+
+        char string[N] {};
+    };
+
+    struct SuiteName
+    {
+        SuiteName(const std::string& name)
+        {
+            using namespace impl;
+            if (!name.empty()) GetRegistry().LastSuite(&(GetRegistry().GetSuite(name)));
+            std::println("!!!!! created suite name");
+        }
+        SuiteName(const char* name) : SuiteName(std::string(name)) {}
+    };
+    struct TestName
+    {
+        TestName(const std::string& name)
+        {
+            using namespace impl;
+            if (!name.empty()) GetRegistry().LastTest(&(GetRegistry().LastSuite()->Add(name)));
+            std::println("!!!!! created test name");
+        }
+        TestName(const char* name) : TestName(std::string(name)) {}
+    };
+    struct TestFunc
+    {
+        template<class F, class = std::enable_if_t<std::is_invocable_r_v<nm::Result, F>>>
+        TestFunc(F&& f)
+        {
+            using namespace impl;
+            const std::function<nm::Result()> fn = std::forward<F>(f);
+            if (fn) GetRegistry().LastTest()->Func(fn);
+            std::println("!!!!! created test func");
+        }
+    };
+    struct SetupFunc
+    {
+        template<class F, class = std::enable_if_t<std::is_invocable_r_v<void, F>>>
+        SetupFunc(F&& f)
+        {
+            using namespace impl;
+            const std::function<void()> fn = std::forward<F>(f);
+            GetRegistry().LastTest()->Setup(fn);
+            std::println("!!!!! created test func");
+        }
+    };
 }
 
 export namespace nm
 {
-    struct SuiteName
-    {
-        std::string name;
-        SuiteName(const std::string& name) : name(name)
-        {
-            using namespace impl;
-            GetRegistry().LastSuite(&(GetRegistry().GetSuite(name)));
-            std::println("!!!!! created suite name");
-        }
-        SuiteName& operator = (const std::string& rhs)
-        {
-            std::println("!!!!! created suite name");
-            name = rhs;
-            return *this;
-        }
-    };
-    struct TestName
-    {
-        std::string name;
-        TestName(const std::string& name) : name(name)
-        {
-            using namespace impl;
-            GetRegistry().LastTest(&(GetRegistry().LastSuite()->Add(name)));
-            std::println("!!!!! created test name");
-        }
-        TestName& operator = (const std::string& rhs)
-        {
-            std::println("!!!!! created test name");
-            name = rhs;
-            return *this;
-        }
-    };
-    struct TestFunc
-    {
-        std::function<nm::Result()> func;
-        TestFunc(const std::function<nm::Result()>& func)
-        {
-            using namespace impl;
-            GetRegistry().LastTest()->Func(func);
-            std::println("!!!!! created test func");
-        }
-        TestFunc& operator = (const std::function<nm::Result()>& rhs)
-        {
-            std::println("!!!!! created test func");
-            func = rhs;
-            return *this;
-        }
-    };
+    // structure for registering a test
     struct TestS
     {
-        SuiteName suite;
-        TestName test;
-        TestFunc func;
+        impl::SuiteName suite;
+        impl::TestName test;
+        impl::TestFunc func;
     };
 
-
-
-    struct RawTest
+    // template structure for registering a test
+    template<impl::StructuralString suite,
+             impl::StructuralString name,
+             nm::Result (* func) ()>
+    struct TestT
     {
-        std::string name, suite;
-        std::vector<std::string> tags;
-        std::function<nm::Result()> func;
-    };
-    struct TestStructBase
-    {
-        TestStructBase(RawTest) {}
-        std::string name, suite;
-        std::vector<std::string> tags;
-        std::function<nm::Result()> func;
-    };
-
-    struct TestStruct
-    {
-        TestStruct(RawTest rt)
+        TestT()
         {
-            impl::GetRegistry().AddTest(rt.suite, rt.name, impl::Registry::TestCase(rt.tags,rt.func));
+            using namespace impl;
+            GetRegistry().LastTest(&(GetRegistry().AddTest(suite, name, Registry::TestCase{})));
+            GetRegistry().LastTest()->Func(func);
         }
+
+        static const TestT registerer;
     };
+    template <impl::StructuralString suite,
+              impl::StructuralString name,
+              nm::Result (* func) ()>
+    const TestT<suite, name, func> TestT<suite, name, func>::registerer;
+
+    // ------------------------------------------------------------------------
 
     // register a test function
     auto Test(

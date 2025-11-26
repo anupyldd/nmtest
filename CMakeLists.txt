@@ -16,5 +16,6 @@ target_sources(${LIB_NAME}
 add_executable(${PROJECT_NAME}
         test/main.cpp
         test/test_header.h
-        test/test_source.cpp)
+        test/test_source.cpp
+        test/another_test_source.cpp)
 target_link_libraries(${PROJECT_NAME} PRIVATE ${LIB_NAME})

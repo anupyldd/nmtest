@@ -73,6 +73,23 @@ export namespace nm
         std::vector<std::string> messages;
         bool success;
     };
+
+    struct TestData
+    {
+        std::string              name;     // test name
+        std::vector<std::string> tags;     // tags used for test filtering
+        std::function<Result()>  func;     // test function
+        std::function<void()>    setup;    // function that runs before the test function
+        std::function<void()>    teardown; // function that runs after the test function
+    };
+
+    struct SuiteData
+    {
+        std::string              name;     // suite name
+        std::vector<std::string> tags;     // tags used for filtering
+        std::function<void()>    setup;    // function that runs before the tests
+        std::function<void()>    teardown; // function that runs after the tests
+    };
 }
 
 namespace impl
@@ -199,10 +216,10 @@ namespace types
 
 namespace impl
 {
-    constinit auto FloatEpsilon  = 1.192092896e-07F;
-    constinit auto FloatMin      = 1.175494351e-38F;
-    constinit auto DoubleEpsilon = 2.2204460492503131e-016;
-    constinit auto DoubleMin     = 2.2250738585072014e-308;
+    constinit auto floatEpsilon  = 1.192092896e-07F;
+    constinit auto floatMin      = 1.175494351e-38F;
+    constinit auto doubleEpsilon = 2.2204460492503131e-016;
+    constinit auto doubleMin     = 2.2250738585072014e-308;
 
     // compares floating point numbers for equality
     template<types::FloatingPoint T>
@@ -211,8 +228,8 @@ namespace impl
     {
         // different epsilon for float and double
         constexpr bool isFloat = std::is_same_v<T, float_t>;
-        const auto epsilon = isFloat ? 128 * FloatEpsilon : 128 * DoubleEpsilon;
-        const auto absTh  = isFloat ? FloatMin : DoubleMin;
+        const auto epsilon = isFloat ? 128 * floatEpsilon : 128 * doubleEpsilon;
+        const auto absTh  = isFloat ? floatMin : doubleMin;
 
         if (a == b) return true;
 
@@ -383,7 +400,7 @@ namespace impl
             }
 
             // add a test
-            auto Add(
+            auto Test(
                 const std::string& name,
                 const TestCase& test) -> TestCase&
             {
@@ -391,8 +408,15 @@ namespace impl
                 return tests.back().second;
             }
 
+            auto Test(const nm::TestData& data) -> TestSuite&
+            {
+                tests.emplace_back(data.name, TestCase(
+                    data.tags, data.func, data.setup, data.teardown));
+                return *this;
+            }
+
             // add an empty test (without test fn)
-            auto Add(const std::string& name) -> TestCase&
+            auto Test(const std::string& name) -> TestCase&
             {
                 tests.emplace_back(name, TestCase{});
                 return tests.back().second;
@@ -470,7 +494,7 @@ namespace impl
             const std::string& name,
             const TestCase& test) -> TestCase&
         {
-            return suites[suite].Add(name, test);
+            return suites[suite].Test(name, test);
         }
 
         // get all tests
@@ -542,7 +566,7 @@ namespace impl
                 if (name == testName) return test;
             }
 
-            auto& newTest = suite.Add(testName, TestCase{});
+            auto& newTest = suite.Test(testName, TestCase{});
             return newTest;
         }
 
@@ -707,7 +731,7 @@ namespace impl
         TestName(const std::string& name)
         {
             using namespace impl;
-            if (!name.empty()) GetRegistry().LastTest(&(GetRegistry().LastSuite()->Add(name)));
+            if (!name.empty()) GetRegistry().LastTest(&(GetRegistry().LastSuite()->Test(name)));
             std::println("!!!!! created test name");
         }
         TestName(const char* name) : TestName(std::string(name)) {}
@@ -749,7 +773,7 @@ export namespace nm
     // template structure for registering a test
     template<impl::StructuralString suite,
              impl::StructuralString name,
-             nm::Result (* func) ()>
+             Result (* func) ()>
     struct TestT
     {
         TestT()
@@ -763,7 +787,7 @@ export namespace nm
     };
     template <impl::StructuralString suite,
               impl::StructuralString name,
-              nm::Result (* func) ()>
+              Result (* func) ()>
     const TestT<suite, name, func> TestT<suite, name, func>::registerer;
 
     // ------------------------------------------------------------------------
@@ -779,11 +803,10 @@ export namespace nm
     }
 
     // add a suite with any number of tests
-    auto Suite(const std::string& name, const std::initializer_list<std::string>& tags =
-              std::initializer_list<std::string>()) -> void
+    auto Suite(const std::string& name) -> impl::Registry::TestSuite&
     {
         using namespace impl;
-        GetRegistry().AddSuite(name, impl::Registry::TestSuite(tags));
+        return GetRegistry().AddSuite(name, Registry::TestSuite());
     }
 
     // get the registry

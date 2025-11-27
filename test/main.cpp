@@ -151,6 +151,21 @@ void TestLib()
             return res;
         });
 
+        Suite("Math")
+        .Setup([]{std::println("expected Math setup");})
+        .Teardown([]{std::println("expected Math teardown");})
+        .Test({
+            .name = "FromSuite 1",
+            .func = []{ return Equal(0,9); }
+        })
+        .Test({
+            .name = "FromSuite 2",
+            .tags = {"tag1", "tag2"},
+            .func = []{ return Equal(0,8); },
+            .setup = []{ std::println("expected FromSuite 2 setup"); },
+            .teardown = []{ std::println("expected FromSuite 2 teardown"); },
+        });
+
         Run();
     }
 

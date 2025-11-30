@@ -600,7 +600,7 @@ namespace impl
             const std::string& name,
             const TestBase*    testOrSuite,
             const FuncType     funcType,
-                  Summary&     summary) -> std::optional<TestStatus>
+                  Summary&     summary) -> void
         {
             try
             {
@@ -625,7 +625,7 @@ namespace impl
                         default: break;
                     }
 
-                    return std::nullopt;
+                    return;
                 }
 
                 if (const auto* test = dynamic_cast<const TestCase*>(testOrSuite))
@@ -636,14 +636,14 @@ namespace impl
                         {
                             if (test->TestBase::Setup())
                                 test->TestBase::Setup()();
-                            return std::nullopt;
+                            return;
                         }
 
                         case FuncType::Teardown:
                         {
                             if (test->TestBase::Teardown())
                                 test->TestBase::Teardown()();
-                            return std::nullopt;
+                            return;
                         }
 
                         case FuncType::Test:
@@ -653,7 +653,7 @@ namespace impl
                             if (!test->Func())
                             {
                                 fmt::ReportMissingTest(name);
-                                return TestStatus::Error;
+                                return;
                             }
 
                             const auto res = test->Func()();
@@ -661,27 +661,22 @@ namespace impl
                             if (res)
                             {
                                 ++summary.passed;
-                                return TestStatus::Pass;
+                                return;
                             }
                             summary.failed.emplace_back(name);
-                            return TestStatus::Fail;
                         }
                     }
                 }
-
-                return TestStatus::Error;
             }
             catch (const std::exception& e)
             {
                 fmt::ReportException(funcType, name, e.what());
                 summary.errors.emplace_back(name);
-                return TestStatus::Error;
             }
             catch (...)
             {
                 fmt::ReportException(funcType, name);
                 summary.errors.emplace_back(name);
-                return TestStatus::Error;
             }
 
 

@@ -801,7 +801,8 @@ export namespace nm
     auto Suite(const std::string& name) -> impl::Registry::TestSuite&
     {
         using namespace impl;
-        return GetRegistry().AddSuite(name, Registry::TestSuite());
+        //return GetRegistry().AddSuite(name, Registry::TestSuite());
+        return GetRegistry().GetSuite(name);
     }
 
     // get the registry

@@ -166,6 +166,8 @@ void TestLib()
             .teardown = []{ std::println("expected FromSuite 2 teardown"); },
         });
 
+        auto ref = Registry();
+
         Run();
     }
 

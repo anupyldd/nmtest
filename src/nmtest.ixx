@@ -5,18 +5,195 @@ module;
 #include <string>
 #include <algorithm>
 #include <exception>
+#include <expected>
 #include <unordered_map>
 #include <format>
-#include <print>
 #include <source_location>
-#include <sstream>
+#include <filesystem>
+#include <iostream>
+#include <print>
+#include <ranges>
 
 export module nm;
 
-namespace detail
+export namespace nm
 {
-    auto LogIndent = "          ";
+    class Result
+    {
+    public:
+        Result(
+            const bool success = true,
+                  std::string type = std::string(),       // type of assert (e.g. "Equal")
+                  std::string message = std::string(),    // custom message provided by the user
+            const std::source_location& loc = std::source_location())
+            : success(success)
+        {
+            if (!success)
+            {
+                const auto filename = std::filesystem::path(loc.file_name()).filename().string();
+                if (message.empty())
+                    messages.push_back(std::format("{} | {}:{}",
+                        std::move(type), filename, loc.line()));
+                else
+                    messages.push_back(std::format("{} | {}:{} | {}",
+                        std::move(type), filename, loc.line(), message));
+            }
+        }
 
+        // intentionally implicit
+        constexpr operator bool() const
+        {
+            return success;
+        }
+
+        constexpr Result& operator & (const Result& rhs)
+        {
+            success = (success && rhs.success);
+            if (!rhs.success)
+                for (const auto& msg : rhs.messages)
+                    messages.push_back(msg);
+            return *this;
+        }
+
+        // get the message
+        [[nodiscard]]
+        constexpr auto Messages() const -> const std::vector<std::string>&
+        {
+            return messages;
+        }
+
+        // get the success status
+        [[nodiscard]]
+        constexpr auto Success() const -> bool
+        {
+            return success;
+        }
+
+    private:
+        std::vector<std::string> messages;
+        bool success;
+    };
+
+    struct TestData
+    {
+        std::string              name;     // test name
+        std::vector<std::string> tags;     // tags used for test filtering
+        std::function<Result()>  func;     // test function
+        std::function<void()>    setup;    // function that runs before the test function
+        std::function<void()>    teardown; // function that runs after the test function
+    };
+
+    struct SuiteData
+    {
+        std::string              name;     // suite name
+        std::vector<std::string> tags;     // tags used for filtering
+        std::function<void()>    setup;    // function that runs before the tests
+        std::function<void()>    teardown; // function that runs after the tests
+    };
+}
+
+namespace impl
+{
+    enum class FuncType : std::uint8_t
+    {
+        Setup,
+        Test,
+        Teardown
+    };
+}
+
+namespace fmt
+{
+    const auto indent     = "         "; // "         " log prefix
+    const auto suite      = "[  SUITE]"; // "[  SUITE]" log prefix
+    const auto pass       = "[   PASS]"; // "[   PASS]" log prefix
+    const auto error      = "[! ERROR]"; // "[! ERROR]" log prefix
+    const auto fail       = "[X  FAIL]"; // "[X  FAIL]" log prefix
+    const auto summary    = "[SUMMARY]"; // "[SUMMARY]" log prefix
+
+    // format assert with actual and expected values
+    template<typename T>
+    [[nodiscard]]
+    constexpr auto ActualExpected(
+        const std::string& type,
+        const T& actual,
+        const T& expected) -> std::string
+    {
+        return std::format("{}({}:{})", type, actual, expected);
+    }
+
+    // print an error like "[! ERROR] Test 1: Setup function has thrown an unhandled exception 'whatever'"
+    constexpr auto ReportException(
+        const impl::FuncType type,
+        const std::string& name,
+        const std::string& what = std::string()) -> void
+    {
+        const auto funcType = (type == impl::FuncType::Setup) ?
+            "Setup" : (type == impl::FuncType::Teardown) ?
+            "Teardown" :
+            "Test";
+
+        if (what.empty())
+            std::println("{} {}: {} function has thrown an unhandled exception",
+                fmt::error, name, funcType);
+        else
+            std::println("{} {}: {} function has thrown an unhandled exception '{}'",
+                fmt::error, name, funcType, what);
+    };
+
+    constexpr auto ReportResult(
+        const std::string& testName,
+        const nm::Result& res) -> void
+    {
+        if (res.Success())
+        {
+            std::println("{} {}", pass, testName);
+        }
+        else
+        {
+            std::println("{} {}: ", fail, testName);
+            for (const auto& msg : res.Messages())
+                std::println("{} - {}", indent, msg);
+        }
+    }
+
+    auto ReportSummary(
+        const int total,
+        const int passed,
+        const std::vector<std::string>& failed,
+        const std::vector<std::string>& errors) -> void
+    {
+        std::cout <<
+            summary << " Total: " <<
+            total << "; Passed: " <<
+            passed << "; Failed: " <<
+            failed.size() << "; Errors: " <<
+            errors.size() << '\n';
+        //std::println("{} Total: {}; Passed: {}; Failed: {}; Errors: {}",
+        //    summary, passed, failed.size(), errors.size());
+
+        if (!failed.empty())
+        {
+            std::println("{} Failed tests:", indent);
+            for (const auto& f : failed)
+                std::println("{} - {}", indent, f);
+        }
+        if (!errors.empty())
+        {
+            std::println("{} Tests with errors:", indent);
+            for (const auto& e : errors)
+                std::println("{} - {}", indent, e);
+        }
+    }
+
+    void ReportMissingTest(const std::string& testName)
+    {
+        std::println("{} {}: missing the test function", error, testName);
+    }
+}
+
+namespace types
+{
     // integral type, excludes char and bool
     template<typename T>
     concept Integer = std::is_integral_v<T>     &&
@@ -35,15 +212,24 @@ namespace detail
     template<typename T>
     concept Number = Integer<T> || FloatingPoint<T>;
 
+}
+
+namespace impl
+{
+    constinit auto floatEpsilon  = 1.192092896e-07F;
+    constinit auto floatMin      = 1.175494351e-38F;
+    constinit auto doubleEpsilon = 2.2204460492503131e-016;
+    constinit auto doubleMin     = 2.2250738585072014e-308;
+
     // compares floating point numbers for equality
-    template<FloatingPoint T>
+    template<types::FloatingPoint T>
     [[nodiscard]]
     constexpr auto AlmostEqual(T a, T b) noexcept -> bool
     {
         // different epsilon for float and double
         constexpr bool isFloat = std::is_same_v<T, float_t>;
-        const auto epsilon = isFloat ? 128 * FLT_EPSILON : 128 * DBL_EPSILON;
-        const auto absTh  = isFloat ? FLT_MIN : DBL_MIN;
+        const auto epsilon = isFloat ? 128 * floatEpsilon : 128 * doubleEpsilon;
+        const auto absTh  = isFloat ? floatMin : doubleMin;
 
         if (a == b) return true;
 
@@ -57,379 +243,14 @@ namespace detail
     [[nodiscard]]
     constexpr auto NumericEqual(T a,T b) -> bool
     {
-        if constexpr (FloatingPoint<T>)
+        if constexpr (types::FloatingPoint<T>)
             return AlmostEqual<T>(a, b);
         return (a == b);
     }
-}
 
-export namespace nm
-{
-    class Registry; // registry of all tests
-    class Suite;    // a test suite for grouping related tests
-    class Test;     // a single test
-    class Result;   // result of a single check
-    class Report;   // combined results of several checks
-
-    class Result
-    {
-        friend Report;
-
-    public:
-        Result(
-            const bool success,
-            std::string type = std::string(),
-            const std::source_location& loc = std::source_location())
-            : success(success)
-        {
-            message = std::format("Failed assert: '{}'; File: '{}'; Line: '{}'",
-                std::move(type), loc.file_name(), loc.line());
-        }
-
-        constexpr operator bool() const
-        {
-            return success;
-        }
-
-        // get the message
-        [[nodiscard]]
-        auto Message() const -> const std::string&
-        {
-            return message;
-        }
-
-        // get the success status
-        [[nodiscard]]
-        auto Success() const -> bool
-        {
-            return success;
-        }
-
-    private:
-        std::string message;
-        bool success = false;
-    };
-
-    class Report
-    {
-        friend Registry;
-
-    public:
-        Report& operator &= (const Result& rhs)
-        {
-            success = (success && rhs.success);
-            if (!rhs.success) messages.push_back(rhs.message);
-            return *this;
-        }
-
-        Report& operator & (const Result& rhs)
-        {
-            success = (success && rhs.success);
-            if (!rhs.success) messages.push_back(rhs.message);
-            return *this;
-        }
-
-        operator bool () const
-        {
-            return success;
-        }
-
-        [[nodiscard]]
-        auto Format() const -> std::string
-        {
-            std::stringstream sstr;
-            for (const auto& msg : messages)
-                sstr << detail::LogIndent << msg << '\n';
-            return sstr.str();
-        }
-
-        // get the list of all aggregated messages
-        [[nodiscard]]
-        auto Messages() const -> const std::vector<std::string>&
-        {
-            return messages;
-        }
-
-        // get the success status
-        [[nodiscard]]
-        auto Success() const -> bool
-        {
-            return success;
-        }
-
-    private:
-        std::vector<std::string> messages;
-        bool success = true;
-    };
-
-    class Test
-    {
-        friend Suite;
-        friend Registry;
-
-    public:
-        Test(std::string name) : name(std::move(name)) {}
-
-        // add test function
-        auto Func(std::function<Report()> func) -> Test&
-        {
-            test = std::move(func);
-            return *this;
-        }
-
-        // get the test function
-        [[nodiscard]]
-        auto Func() const -> const std::function<Report()>&
-        {
-            return test;
-        }
-
-        // add setup function (will be called before the test)
-        auto Setup(std::function<void()> func) -> Test&
-        {
-            setup = std::move(func);
-            return *this;
-        }
-
-        // get the setup function
-        [[nodiscard]]
-        auto Setup() const -> const std::function<void()>&
-        {
-            return setup;
-        }
-
-        // add teardown function (will be called after the test)
-        auto Teardown(std::function<void()> func) -> Test&
-        {
-            teardown = std::move(func);
-            return *this;
-        }
-
-        // get the teardown function
-        [[nodiscard]]
-        auto Teardown() const -> const std::function<void()>&
-        {
-            return teardown;
-        }
-
-        // get the test name
-        auto Name() const -> const std::string&
-        {
-            return name;
-        }
-
-    private:
-        std::function<void()> setup;
-        std::function<Report()> test;
-        std::function<void()> teardown;
-        std::string name;
-    };
-
-    class Suite
-    {
-        friend Test;
-        friend Registry;
-
-    public:
-        Suite(std::string name) : name(std::move(name)) {}
-
-        // add setup function (will be called before the start of this suite)
-        auto Setup(std::function<void()> func) -> Suite&
-        {
-            setup = std::move(func);
-            return *this;
-        }
-
-        // get the setup function
-        [[nodiscard]]
-        auto Setup() const -> const std::function<void()>&
-        {
-            return setup;
-        }
-
-        // add teardown function (will be called after the end of this suite)
-        auto Teardown(std::function<void()> func) -> Suite&
-        {
-            teardown = std::move(func);
-            return *this;
-        }
-
-        // get the teardown function
-        [[nodiscard]]
-        auto Teardown() const -> const std::function<void()>&
-        {
-            return teardown;
-        }
-
-        // add tests to the registry
-        template<typename T, typename... Ts>
-        requires (std::same_as<std::decay_t<T>, Test> &&
-                 (std::same_as<std::decay_t<Ts>, std::decay_t<T>> && ...))
-        auto Add(T&& first, Ts&&... rest) -> void
-        {
-            tests.emplace_back(std::forward<T>(first));
-            (tests.emplace_back(std::forward<Ts>(rest)), ...);
-        }
-
-        // get the list of added tests
-        [[nodiscard]]
-        auto Tests() const -> const std::vector<Test>&
-        {
-            return tests;
-        }
-
-        // get the suite name
-        [[nodiscard]]
-        auto Name() const -> const std::string&
-        {
-            return name;
-        }
-
-    private:
-        std::function<void()> setup;
-        std::function<void()> teardown;
-
-        std::string name;
-        std::vector<Test> tests;
-    };
-
-    class Registry
-    {
-    public:
-        // add a test suite to the registry
-        auto Suite(std::string name) -> nm::Suite&
-        {
-            return suites.emplace_back(std::move(name));
-        }
-
-        // get the list of added suites
-        [[nodiscard]]
-        auto Suites() const -> const std::vector<nm::Suite>&
-        {
-            return suites;
-        }
-
-        // run all tests in all suites and report the results
-        auto Run() -> void
-        {
-            int total  = 0,
-                failed = 0,
-                errors = 0;
-            std::vector<std::string> fails;
-
-            for (auto& suite : suites)
-            {
-                if (suite.setup) suite.setup();
-                std::println("[  SUITE] {}", suite.name);
-
-                for (auto& test : suite.tests)
-                {
-                    auto& testName = test.name;
-
-                    if (!test.test)
-                    {
-                        std::println("[! ERROR] Test '{}': missing the test function", testName);
-                        continue;
-                    }
-
-                    // setup ----------
-                    try
-                    {
-                        if (test.setup) test.setup();
-                    }
-                    catch (const std::exception& e)
-                    {
-                        std::println("[! ERROR] Test '{}': Setup function has thrown an unhandled exception '{}'",
-                            testName, e.what());
-                        ++errors;
-                        continue;
-                    }
-                    catch (...)
-                    {
-                        std::println("[! ERROR] Test '{}': Setup function has thrown an unknown unhandled exception",
-                            testName);
-                        ++errors;
-                        continue;
-                    }
-
-                    // test ----------
-                    try
-                    {
-                        auto rep = test.test();
-                        if (rep)
-                        {
-                            std::println("[   PASS] {}", testName);
-                        }
-                        else
-                        {
-                            std::println("[X  FAIL] {}:\n{}", testName, rep.Format());
-                            ++failed;
-                            fails.push_back(testName);
-                        }
-                    }
-                    catch (const std::exception& e)
-                    {
-                        std::println("[! ERROR] Test '{}': Test function has thrown an unhandled exception '{}'",
-                            testName, e.what());
-                        ++errors;
-                        continue;
-                    }
-                    catch (...)
-                    {
-                        std::println("[! ERROR] Test '{}': Test function has thrown an unknown unhandled exception",
-                            testName);
-                        ++errors;
-                        continue;
-                    }
-
-                    // teardown ----------
-                    try
-                    {
-                        if (test.teardown) test.teardown();
-                    }
-                    catch (const std::exception& e)
-                    {
-                        std::println("[! ERROR] Test '{}': Teardown function has thrown an unhandled exception '{}'",
-                            testName, e.what());
-                        ++errors;
-                        continue;
-                    }
-                    catch (...)
-                    {
-                        std::println("[! ERROR] Test '{}': Teardown function has thrown an unknown unhandled exception",
-                            testName);
-                        ++errors;
-                        continue;
-                    }
-
-                    ++total;
-                }
-
-
-                if (suite.teardown) suite.teardown();
-            }
-
-            std::println("[SUMMARY] Total: {}; Succeeded: {}; Failed: {}; Errors: {}",
-                total, total - failed, failed, errors);
-
-            if (failed > 0)
-            {
-                std::println("{}Failed tests:", detail::LogIndent);
-                for (const auto& name : fails)
-                    std::println("          - {}", name);
-            }
-        }
-
-    private:
-        std::vector<nm::Suite> suites;
-    };
-}
-
-namespace detail
-{
     template<typename F, typename Tuple = std::tuple<>>
     [[nodiscard]]
-    constexpr auto ThrowsImpl(F&& func, Tuple&& argsTuple = {}) -> bool
+    constexpr auto Throws(F&& func, Tuple&& argsTuple = {}) -> bool
     {
         try
         {
@@ -444,7 +265,7 @@ namespace detail
 
     template<typename T>
     [[nodiscard]]
-    constexpr auto NullImpl(T val) -> bool
+    constexpr auto Null(T val) -> bool
     {
         return static_cast<bool>(!val);
     }
@@ -455,6 +276,546 @@ namespace detail
     {
         return val;
     }
+
+    // REGISTRY ---------------------------------------------------------------
+
+    class Registry
+    {
+    public:
+        // setup, teardown, tags
+        class TestBase
+        {
+        public:
+            TestBase(
+                const std::vector<std::string>& tags = std::vector<std::string>(),
+                      std::function<void()>  setup = std::function<void()>(),
+                      std::function<void()>  teardown = std::function<void()>())
+                    : setup(std::move(setup)), teardown(std::move(teardown)), tags(tags) {}
+
+            virtual ~TestBase() = default;
+
+            // get the setup function
+            [[nodiscard]]
+            virtual auto Setup() const noexcept -> const std::function<void()>&
+            {
+                return setup;
+            }
+
+            // get the teardown function
+            [[nodiscard]]
+            virtual auto Teardown() const noexcept -> const std::function<void()>&
+            {
+                return teardown;
+            }
+
+            // get tags
+            [[nodiscard]]
+            virtual auto Tags() const noexcept -> const std::vector<std::string>&
+            {
+                return tags;
+            }
+
+        protected:
+            std::function<void()> setup;
+            std::function<void()> teardown;
+            std::vector<std::string> tags;
+        };
+
+        class TestCase final : public TestBase
+        {
+        public:
+            TestCase(
+                const std::vector<std::string>& tags = std::vector<std::string>(),
+                      std::function<nm::Result()> func = std::function<nm::Result()>(),
+                      std::function<void()> setup = std::function<void()>(),
+                      std::function<void()> teardown = std::function<void()>())
+                    : TestBase(tags, std::move(setup), std::move(teardown)), func(std::move(func)) {}
+
+            ~TestCase() override = default;
+
+            // add the test function
+            auto Func(const std::function<nm::Result()>& fn) -> TestCase&
+            {
+                if (fn) func = fn;
+                return *this;
+            }
+
+            // get the test function
+            [[nodiscard]]
+            auto Func() const -> const std::function<nm::Result()>&
+            {
+                return func;
+            }
+
+            // add the setup function
+            auto Setup(const std::function<void()>& fn) -> TestCase&
+            {
+                if (fn) setup = fn;
+                return *this;
+            }
+
+            // add the setup function
+            auto Teardown(const std::function<void()>& fn) -> TestCase&
+            {
+                if (fn) teardown = fn;
+                return *this;
+            }
+
+            // add tags
+            auto Tags(const std::initializer_list<std::string>& tagList) -> TestCase&
+            {
+                tags.reserve(tags.size() + tagList.size());
+                for (const auto& tag : tagList)
+                    tags.push_back(tag);
+                return *this;
+            }
+
+        private:
+            std::function<nm::Result()> func;
+        };
+
+        class TestSuite final : public TestBase
+        {
+        public:
+            TestSuite(
+                const std::vector<std::string>& tags = std::vector<std::string>(),
+                      std::function<void()> setup = std::function<void()>(),
+                      std::function<void()> teardown = std::function<void()>())
+                    : TestBase(tags, std::move(setup), std::move(teardown)) {}
+
+            ~TestSuite() override = default;
+
+            // add the setup function
+            auto Setup(const std::function<void()>& fn) -> TestSuite&
+            {
+                if (fn) setup = fn;
+                return *this;
+            }
+
+            // add the setup function
+            auto Teardown(const std::function<void()>& fn) -> TestSuite&
+            {
+                if (fn) teardown = fn;
+                return *this;
+            }
+
+            // add a test
+            auto Test(
+                const std::string& name,
+                const TestCase& test) -> TestCase&
+            {
+                tests.emplace_back(name, test);
+                return tests.back().second;
+            }
+
+            auto Test(const nm::TestData& data) -> TestSuite&
+            {
+                tests.emplace_back(data.name, TestCase(
+                    data.tags, data.func, data.setup, data.teardown));
+                return *this;
+            }
+
+            // add an empty test (without test fn)
+            auto Test(const std::string& name) -> TestCase&
+            {
+                tests.emplace_back(name, TestCase{});
+                return tests.back().second;
+            }
+
+            // add tags
+            auto Tags(const std::initializer_list<std::string>& tagList) -> TestSuite&
+            {
+                tags.reserve(tags.size() + tagList.size());
+                for (const auto& tag : tagList)
+                    tags.push_back(tag);
+                return *this;
+            }
+
+            // get list of test indices
+            [[nodiscard]]
+            auto Tests() const -> const std::vector<std::pair<std::string, TestCase>>&
+            {
+                return tests;
+            }
+
+            // get list of test indices
+            [[nodiscard]]
+            auto Tests() -> std::vector<std::pair<std::string, TestCase>>&
+            {
+                return tests;
+            }
+
+        private:
+            std::vector<std::pair<std::string, TestCase>> tests;
+        };
+
+        // query to the registry for filtering
+        struct Query
+        {
+            std::vector<std::string> suites;
+            std::vector<std::string> tags;
+        };
+
+        // structure containing query error info (tags/suites that were not found)
+        struct QueryError
+        {
+            std::vector<std::string> tags;
+            std::vector<std::string> suites;
+        };
+
+        enum class TestStatus : std::uint8_t
+        {
+            Pass,
+            Fail,
+            Error
+        };
+
+        struct Summary
+        {
+            int  total  = 0,
+                 passed = 0;
+            std::vector<std::string> failed,
+                                     errors;
+        };
+
+    public:
+        // register a suite
+        auto AddSuite(
+            const std::string& name,
+            const TestSuite& suite) -> TestSuite&
+        {
+            suites[name] = suite;
+            return suites[name];
+        }
+
+        // register a test
+        auto AddTest(
+            const std::string& suite,
+            const std::string& name,
+            const TestCase& test) -> TestCase&
+        {
+            return suites[suite].Test(name, test);
+        }
+
+        // get all tests
+        [[nodiscard]]
+        auto AllTests() const -> const std::unordered_map<std::string, TestSuite>&
+        {
+            return suites;
+        }
+
+        // run tests with optional filtering
+        auto Run(const auto& query) -> void
+        {
+            Summary summary;
+
+            // iterate over suites that are in query.suites
+            for (const auto& [suiteName, suite] : suites
+                | std::views::filter([&](const auto& pair)
+                {
+                    if (query.suites.empty()) return true;
+                    return std::ranges::contains(query.suites, pair.first);
+                }))
+            {
+                TryInvoke(suiteName, &suite, FuncType::Setup, summary);
+
+                for (const auto& [testName, test] : suite.Tests()
+                    | std::views::filter([&](const auto& pair)
+                    {
+                        if (query.tags.empty()) return true;
+                        for (const auto& tag : pair.second.TestBase::Tags())
+                            if (std::ranges::contains(query.tags, tag)) return true;
+                        return false;
+                    }))
+                {
+                    TryInvoke(testName, &test, FuncType::Setup,    summary);
+                    TryInvoke(testName, &test, FuncType::Test,     summary);
+                    TryInvoke(testName, &test, FuncType::Teardown, summary);
+                }
+
+                TryInvoke(suiteName, &suite, FuncType::Teardown, summary);
+            }
+
+            fmt::ReportSummary(summary.total, summary.passed, summary.failed, summary.errors);
+        }
+
+        // parse cli into a query
+        [[nodiscard]]
+        auto ParseArgs(int argc, char** argv) -> Query
+        {
+            return Query{};
+        }
+
+        // get specific suite. create if not found
+        [[nodiscard]]
+        auto GetSuite(const std::string& name) -> TestSuite&
+        {
+            return suites[name];
+        }
+
+        // get specific test. create if not found
+        [[nodiscard]]
+        auto GetTest(
+            const std::string& suiteName,
+            const std::string& testName) -> TestCase&
+        {
+            auto& suite = GetSuite(suiteName);
+
+            for (auto& [name, test] : suite.Tests())
+            {
+                if (name == testName) return test;
+            }
+
+            auto& newTest = suite.Test(testName, TestCase{});
+            return newTest;
+        }
+
+        // set last test
+        auto LastTest(TestCase* test) -> void
+        {
+            lastTest = test;
+        }
+        // get last test
+        [[nodiscard]]
+        auto LastTest() const -> TestCase*
+        {
+            return lastTest;
+        }
+
+        // set last suite
+        auto LastSuite(TestSuite* suite) -> void
+        {
+            lastSuite = suite;
+        }
+        // get last suite
+        [[nodiscard]]
+        auto LastSuite() const -> TestSuite*
+        {
+            return lastSuite;
+        }
+
+    private:
+        // try to run a function from a suite
+        static auto TryInvoke(
+            const std::string& name,
+            const TestBase*    testOrSuite,
+            const FuncType     funcType,
+                  Summary&     summary) -> void
+        {
+            try
+            {
+                if (const auto* suite = dynamic_cast<const TestSuite*>(testOrSuite))
+                {
+                    switch (funcType)
+                    {
+                        case FuncType::Setup:
+                        {
+                            if (suite->TestBase::Setup())
+                                suite->TestBase::Setup()();
+                        }
+                        break;
+
+                        case FuncType::Teardown:
+                        {
+                            if (suite->TestBase::Teardown())
+                                suite->TestBase::Teardown()();
+                        }
+                        break;
+
+                        default: break;
+                    }
+
+                    return;
+                }
+
+                if (const auto* test = dynamic_cast<const TestCase*>(testOrSuite))
+                {
+                    switch (funcType)
+                    {
+                        case FuncType::Setup:
+                        {
+                            if (test->TestBase::Setup())
+                                test->TestBase::Setup()();
+                            return;
+                        }
+
+                        case FuncType::Teardown:
+                        {
+                            if (test->TestBase::Teardown())
+                                test->TestBase::Teardown()();
+                            return;
+                        }
+
+                        case FuncType::Test:
+                        {
+                            ++summary.total;
+
+                            if (!test->Func())
+                            {
+                                fmt::ReportMissingTest(name);
+                                return;
+                            }
+
+                            const auto res = test->Func()();
+                            fmt::ReportResult(name, res);
+                            if (res)
+                            {
+                                ++summary.passed;
+                                return;
+                            }
+                            summary.failed.emplace_back(name);
+                        }
+                    }
+                }
+            }
+            catch (const std::exception& e)
+            {
+                fmt::ReportException(funcType, name, e.what());
+                summary.errors.emplace_back(name);
+            }
+            catch (...)
+            {
+                fmt::ReportException(funcType, name);
+                summary.errors.emplace_back(name);
+            }
+
+
+        }
+
+    private:
+        std::unordered_map<std::string, TestSuite> suites;
+        TestSuite* lastSuite = nullptr;
+        TestCase*  lastTest  = nullptr;
+    };
+
+    // get static Registry instance
+    auto GetRegistry() -> Registry&
+    {
+        static Registry reg;
+        return reg;
+    }
+
+    // ------------------------------------------------------------------------
+
+    template<std::size_t N>
+    struct StructuralString
+    {
+        constexpr StructuralString(const char (&str)[N])
+        {
+            std::copy_n(str, N, string);
+        }
+
+        constexpr operator std::string_view () const { return string; }
+        constexpr operator std::string () const { return string; }
+
+        char string[N] {};
+    };
+
+    struct SuiteName
+    {
+        SuiteName(const std::string& name)
+        {
+            using namespace impl;
+            if (!name.empty()) GetRegistry().LastSuite(&(GetRegistry().GetSuite(name)));
+            std::println("!!!!! created suite name");
+        }
+        SuiteName(const char* name) : SuiteName(std::string(name)) {}
+    };
+    struct TestName
+    {
+        TestName(const std::string& name)
+        {
+            using namespace impl;
+            if (!name.empty()) GetRegistry().LastTest(&(GetRegistry().LastSuite()->Test(name)));
+            std::println("!!!!! created test name");
+        }
+        TestName(const char* name) : TestName(std::string(name)) {}
+    };
+    struct TestFunc
+    {
+        template<class F, class = std::enable_if_t<std::is_invocable_r_v<nm::Result, F>>>
+        TestFunc(F&& f)
+        {
+            using namespace impl;
+            const std::function<nm::Result()> fn = std::forward<F>(f);
+            if (fn) GetRegistry().LastTest()->Func(fn);
+            std::println("!!!!! created test func");
+        }
+    };
+    struct SetupFunc
+    {
+        template<class F, class = std::enable_if_t<std::is_invocable_r_v<void, F>>>
+        SetupFunc(F&& f)
+        {
+            using namespace impl;
+            const std::function<void()> fn = std::forward<F>(f);
+            GetRegistry().LastTest()->Setup(fn);
+            std::println("!!!!! created test func");
+        }
+    };
+}
+
+export namespace nm
+{
+    // structure for registering a test
+    struct TestS
+    {
+        impl::SuiteName suite;
+        impl::TestName test;
+        impl::TestFunc func;
+    };
+
+    // template structure for registering a test
+    template<impl::StructuralString suite,
+             impl::StructuralString name,
+             Result (* func) ()>
+    struct TestT
+    {
+        TestT()
+        {
+            using namespace impl;
+            GetRegistry().LastTest(&(GetRegistry().AddTest(suite, name, Registry::TestCase{})));
+            GetRegistry().LastTest()->Func(func);
+        }
+
+        static const TestT registerer;
+    };
+    template <impl::StructuralString suite,
+              impl::StructuralString name,
+              Result (* func) ()>
+    const TestT<suite, name, func> TestT<suite, name, func>::registerer;
+
+    // ------------------------------------------------------------------------
+
+    // register a test function
+    auto Test(
+        const std::string& suite,
+        const std::string& name,
+        const std::initializer_list<std::string>& tags =
+              std::initializer_list<std::string>()) -> impl::Registry::TestCase&
+    {
+        return impl::GetRegistry().AddTest(suite, name, impl::Registry::TestCase(tags));
+    }
+
+    // add a suite with any number of tests
+    auto Suite(const std::string& name) -> impl::Registry::TestSuite&
+    {
+        using namespace impl;
+        return GetRegistry().AddSuite(name, Registry::TestSuite());
+    }
+
+    // get the registry
+    auto Registry() -> impl::Registry&
+    {
+        return impl::GetRegistry();
+    }
+
+    // run all tests with optional filtering
+    auto Run(const int argc = 1, char** argv = nullptr) -> void
+    {
+        const auto query = impl::GetRegistry().ParseArgs(argc, argv);
+        impl::GetRegistry().Run(query);
+    }
 }
 
 export namespace nm
@@ -463,69 +824,97 @@ export namespace nm
     // works for floating point numbers as well
     template<typename T>
     [[nodiscard]]
-    constexpr auto Equal(const T& actual, const T& expected, const std::source_location loc = std::source_location::current()) -> Result
+    constexpr auto Equal(
+        const T& actual,
+        const T& expected,
+        const std::string& message = std::string(),
+        const std::source_location loc = std::source_location::current()) -> Result
     {
-        const auto res = (detail::Number<T>) ? detail::NumericEqual(actual, expected) : (actual == expected);
-        return res ? Result(true) : Result(false, std::format("Equal [{}:{}]", actual, expected), loc);
+        const auto res = (types::Number<T>) ? impl::NumericEqual(actual, expected) : (actual == expected);
+        return res ? Result(true) : Result(false, fmt::ActualExpected("Equal", actual, expected), message, loc);
     }
 
     // succeeds if actual value is NOT equal to the expected value
     // works for floating point numbers as well
     template<typename T>
     [[nodiscard]]
-    constexpr auto NotEqual(const T& actual, const T& expected, const std::source_location loc = std::source_location::current()) -> Result
+    constexpr auto NotEqual(
+        const T& actual,
+        const T& expected,
+        const std::string& message = std::string(),
+        const std::source_location loc = std::source_location::current()) -> Result
     {
-        const auto res = (detail::Number<T>) ? detail::NumericEqual(actual, expected) : (actual == expected);
-        return res ? Result(false, std::format("NotEqual [{}:{}]", actual, expected), loc) : Result(true);
+        const auto res = (types::Number<T>) ? impl::NumericEqual(actual, expected) : (actual == expected);
+        return res ? Result(false, fmt::ActualExpected("NotEqual", actual, expected), message, loc) : Result(true);
     }
 
     // succeeds if passed F (function, functor, lambda) throws any exception
     template<typename F, typename Tuple = std::tuple<>>
     [[nodiscard]]
-    constexpr auto Throws(F&& func, Tuple&& argsTuple = {}, const std::source_location loc = std::source_location::current()) -> Result
+    constexpr auto Throws(
+              F&& func,
+              Tuple&& argsTuple = {},
+        const std::string& message = std::string(),
+        const std::source_location loc = std::source_location::current()) -> Result
     {
-        return detail::ThrowsImpl(std::forward<F>(func), std::forward<Tuple>(argsTuple)) ?
-            Result(true) : Result(false, "Throws", loc);
+        return impl::Throws(std::forward<F>(func), std::forward<Tuple>(argsTuple)) ?
+            Result(true) : Result(false, "Throws", message, loc);
     }
 
     // succeeds if passed F (function / functor / lambda / ...) does not throw any exception
     template<typename F, typename Tuple = std::tuple<>>
     [[nodiscard]]
-    constexpr auto DoesNotThrow(F&& func, Tuple&& argsTuple = {}, const std::source_location loc = std::source_location::current()) -> Result
+    constexpr auto DoesNotThrow(
+              F&& func,
+              Tuple&& argsTuple = {},
+        const std::string& message = std::string(),
+        const std::source_location loc = std::source_location::current()) -> Result
     {
-        return detail::ThrowsImpl(std::forward<F>(func), std::forward<Tuple>(argsTuple)) ?
-            Result(false, "DoesNotThrow", loc) : Result(true);
+        return impl::Throws(std::forward<F>(func), std::forward<Tuple>(argsTuple)) ?
+            Result(false, "DoesNotThrow", message, loc) : Result(true);
     }
 
     // succeeds if val is null
     template<typename T>
     [[nodiscard]]
-    constexpr auto Null(T val, const std::source_location loc = std::source_location::current()) -> Result
+    constexpr auto Null(
+              T val,
+        const std::string& message = std::string(),
+        const std::source_location loc = std::source_location::current()) -> Result
     {
-        return detail::NullImpl(val) ? Result(true) : Result(false, "Null", loc);
+        return impl::Null(val) ? Result(true) : Result(false, "Null", message, loc);
     }
 
     // succeeds if val is NOT null
     template<typename T>
     [[nodiscard]]
-    constexpr auto NotNull(T val, const std::source_location loc = std::source_location::current()) -> Result
+    constexpr auto NotNull(
+              T val,
+        const std::string& message = std::string(),
+        const std::source_location loc = std::source_location::current()) -> Result
     {
-        return detail::NullImpl(val) ? Result(false, "NotNull", loc) : Result(true);
+        return impl::Null(val) ? Result(false, "NotNull", message, loc) : Result(true);
     }
 
     // succeeds if val is true
     template<typename T>
     [[nodiscard]]
-    constexpr auto True(T val, const std::source_location loc = std::source_location::current()) -> Result
+    constexpr auto True(
+              T val,
+        const std::string& message = std::string(),
+        const std::source_location loc = std::source_location::current()) -> Result
     {
-        return detail::True(val) ? Result(true) : Result(false, "True", loc);
+        return impl::True(val) ? Result(true) : Result(false, "True", message, loc);
     }
 
     // succeeds if val is NOT true
     template<typename T>
     [[nodiscard]]
-    constexpr auto False(T val, const std::source_location loc = std::source_location::current()) -> Result
+    constexpr auto False(
+              T val,
+        const std::string& message = std::string(),
+        const std::source_location loc = std::source_location::current()) -> Result
     {
-        return detail::True(val) ? Result(false, "False", loc) : Result(true);
+        return impl::True(val) ? Result(false, "False", message, loc) : Result(true);
     }
 }

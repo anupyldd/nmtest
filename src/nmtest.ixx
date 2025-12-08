@@ -13,6 +13,7 @@ module;
 #include <iostream>
 #include <print>
 #include <ranges>
+#include <variant>
 
 export module nm;
 
@@ -108,8 +109,34 @@ namespace fmt
     const auto suite      = "[  SUITE]"; // "[  SUITE]" log prefix
     const auto pass       = "[   PASS]"; // "[   PASS]" log prefix
     const auto error      = "[! ERROR]"; // "[! ERROR]" log prefix
+    const auto warning    = "[?  WARN]"; // "[?  WARN]" log prefix
     const auto fail       = "[X  FAIL]"; // "[X  FAIL]" log prefix
     const auto summary    = "[SUMMARY]"; // "[SUMMARY]" log prefix
+
+    auto ToLower(std::string str) -> std::string
+    {
+        std::ranges::transform(str, str.begin(),
+            [](const unsigned char c){ return std::tolower(c); });
+        return str;
+    }
+
+    inline auto LeftTrim(std::string& str) -> void
+    {
+        str.erase(str.begin(), std::ranges::find_if(str,
+            [](const unsigned char ch) { return !std::isspace(ch); }));
+    }
+
+    inline auto RightTrim(std::string& str) -> void
+    {
+        str.erase(std::find_if(str.rbegin(), str.rend(),
+            [](const unsigned char ch) { return !std::isspace(ch); }).base(), str.end());
+    }
+
+    inline auto Trim(std::string& str) -> void
+    {
+        LeftTrim(str);
+        RightTrim(str);
+    }
 
     // format assert with actual and expected values
     template<typename T>
@@ -120,6 +147,37 @@ namespace fmt
         const T& expected) -> std::string
     {
         return std::format("{}({}:{})", type, actual, expected);
+    }
+
+    // print an error like "[! ERROR] some error text (hint)"
+    constexpr auto ReportError(
+        const std::string& errorText,
+        const std::string& hint = {}) -> void
+    {
+        if constexpr (hint.empty())
+            std::println("{} {}", error, errorText);
+        else
+            std::println("{} {} ({})", error, errorText, hint);
+    }
+
+    // TODO: change parameter to option
+    // print an error like "[! ERROR] Unknown option 'some param'"
+    constexpr auto ReportUnknownParameter(
+        const std::string& errorText,
+        const std::string& hint = "Use '-h/--help' to see the list of available options") -> void
+    {
+        ReportError(std::format("Unknown option '{}'", errorText), hint);
+    }
+
+    // print an error like "[! ERROR] some error text (hint)"
+    constexpr auto ReportWarning(
+        const std::string& warningText,
+        const std::string& hint = {}) -> void
+    {
+        if constexpr (hint.empty())
+            std::println("{} {}", warning, warningText);
+        else
+            std::println("{} {} ({})", warning, warningText, hint);
     }
 
     // print an error like "[! ERROR] Test 1: Setup function has thrown an unhandled exception 'whatever'"
@@ -277,6 +335,218 @@ namespace impl
         return val;
     }
 
+    // CLI --------------------------------------------------------------------
+
+    class CLI
+    {
+    public:
+        auto helpText =
+            "Usage:                                                                     \n"
+            "  test [options]                                                           \n"
+            "                                                                           \n"
+            "Options:                                                                   \n"
+            "  -s, --suite <names>         Comma-separated list of suite names to run.  \n"
+            "  -t, --tag <names>           Comma-separated list of tag names to run.    \n"
+            "  -l, --list                  List matching tests without running them.    \n"
+            "  -c, --case_sensitive        Make name matching case-sensitive.           \n"
+            "  -h, --help                  Show this help message.                      \n"
+            "                                                                           \n"
+            "Example:                                                                   \n"
+            "  test -s \"core,math\" -t \"fast\"                                        \n"
+            "    Run all tests from suites \"core\" or \"math\" that have tag \"fast\". \n"
+            "                                                                           \n"
+            "Notes:                                                                     \n"
+            "  - Multiple suites or tags are treated as OR:                             \n"
+            "        -s \"core,math\"     runs tests in either suite.                   \n"
+            "        -t \"fast,slow\"     runs tests tagged fast OR slow.               \n"
+            "  - Names are case-insensitive unless --case_sensitive is used.            \n";
+
+        struct Query
+        {
+            std::vector<std::string> suites;
+            std::vector<std::string> tags;
+        };
+
+        class Parser
+        {
+        public:
+            struct Command
+            {
+                static constexpr std::uint8_t list           = 1 << 0; // -l / --list
+                static constexpr std::uint8_t verbose        = 1 << 1; // -v / --verbose
+                static constexpr std::uint8_t caseSensitive  = 1 << 2; // -c / --case_sensitive
+                static constexpr std::uint8_t help           = 1 << 3; // -h / --help
+                static constexpr std::uint8_t had_error      = 1 << 4; // set if command had any errors
+
+                static constexpr auto suiteTextFull         = "suite";
+                static constexpr auto tagTextFull           = "tag";
+                static constexpr auto listTextFull          = "list";
+                static constexpr auto verboseTextFull       = "verbose";
+                static constexpr auto caseSensitiveTextFull = "case_sensitive";
+                static constexpr auto helpTextFull          = "help";
+
+                static constexpr auto suiteTextShort         = "s";
+                static constexpr auto tagTextShort           = "t";
+                static constexpr auto listTextShort          = "l";
+                static constexpr auto verboseTextShort       = "v";
+                static constexpr auto caseSensitiveTextShort = "c";
+                static constexpr auto helpTextShort          = "h";
+
+                std::string  tagArgs,
+                             suiteArgs;
+                std::uint8_t flags {};
+
+                auto SetFlag(const std::string& arg) -> void
+                {
+                    const auto argNorm = fmt::ToLower(arg);
+
+                    if (argNorm == listTextShort || argNorm == listTextFull)
+                        flags |= list;
+                    else if (argNorm == verboseTextShort || argNorm == verboseTextFull)
+                        flags |= verbose;
+                    else if (argNorm == caseSensitiveTextShort || argNorm == caseSensitiveTextFull)
+                        flags |= caseSensitive;
+                    else if (argNorm == helpTextShort || argNorm == helpTextFull)
+                        flags |= help;
+                    else
+                    {
+                        fmt::ReportUnknownParameter(argNorm);
+                        Error();
+                    }
+                }
+
+                // set the 'had_error' flag
+                auto Error() -> void
+                {
+                    flags |= had_error;
+                }
+            };
+
+        public:
+            static auto GetQuery(const int argc, char** argv) -> std::optional<Query>
+            {
+                const auto cmd = ProcessCommand(argc, argv);
+                if (cmd.flags & Command::had_error) return std::nullopt;
+
+                auto query = Query{};
+                query.suites = ParseNames(cmd.suiteArgs);
+                query.tags   = ParseNames(cmd.tagArgs);
+
+                return query;
+            }
+
+        private:
+            static auto ProcessCommand(const int argc, char** argv) -> Command
+            {
+                const auto argVec = std::vector<std::string>(argv + 1, argv + argc);
+                auto cmd = Command{};
+
+                enum class Awaiting { SuiteFilter, TagFilter, Any };
+                auto await = Awaiting::Any;
+
+                for (const auto& arg : argVec)
+                {
+                    if (arg.starts_with("--"))
+                    {
+                        if (arg.contains('='))
+                        {
+                            const auto equal = arg.find_first_of('=');
+                            const auto param = arg.substr(2, equal - 2);
+                            const auto value = arg.substr(equal + 1);
+
+                            if (param == Command::suiteTextFull) cmd.suiteArgs  = value;
+                            else if (param == Command::tagTextFull) cmd.tagArgs = value;
+                            else
+                            {
+                                fmt::ReportUnknownParameter(param);
+                                cmd.Error();
+                            }
+                            await = Awaiting::Any;
+                        }
+                        else
+                        {
+                            cmd.SetFlag(arg.substr(2));
+                        }
+                    }
+                    else if (arg.starts_with('-'))
+                    {
+                        const auto param = arg.substr(1);
+
+                        if (param == "s") await = Awaiting::SuiteFilter;
+                        else if (param == "t") await = Awaiting::TagFilter;
+                        else cmd.SetFlag(param);
+                    }
+                    else
+                    {
+                        switch (await)
+                        {
+                            case Awaiting::SuiteFilter:
+                            {
+                                if (!cmd.suiteArgs.empty())
+                                    fmt::ReportWarning("Overriding suite filter argument with new values",
+                                        std::format("was: ", cmd.suiteArgs));
+                                cmd.suiteArgs = arg;
+                            }
+                            break;
+
+                            case Awaiting::TagFilter:
+                            {
+                                if (!cmd.tagArgs.empty())
+                                    fmt::ReportWarning("Overriding tag filter argument with new values",
+                                        std::format("was: ", cmd.tagArgs));
+                                cmd.tagArgs = arg;
+                            }
+                            break;
+
+                            case Awaiting::Any:
+                            {
+                                fmt::ReportUnknownParameter(arg);
+                                cmd.Error();
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                // optional normalization for filters
+                if (!(cmd.flags & Command::caseSensitive))
+                {
+                    cmd.suiteArgs = fmt::ToLower(cmd.suiteArgs);
+                    cmd.tagArgs = fmt::ToLower(cmd.tagArgs);
+                }
+
+                return cmd;
+            }
+
+            static auto ParseNames(const std::string& arg) -> std::vector<std::string>
+            {
+                auto sstr = std::stringstream{arg};
+                auto res = std::vector<std::string>{};
+
+                while (sstr.good())
+                {
+                    auto name = std::string{};
+                    std::getline(sstr, name, ',');
+                    res.push_back(name);
+                }
+
+                for (auto& name : res)
+                {
+                    fmt::Trim(name);
+                }
+
+                return res;
+            }
+        };
+    };
+
+    // get static CLI instance
+    auto GetCLI() -> CLI&
+    {
+        static CLI reg;
+        return reg;
+    }
+
     // REGISTRY ---------------------------------------------------------------
 
     class Registry
@@ -286,6 +556,7 @@ namespace impl
         class TestBase
         {
         public:
+            // TODO: change init to {} (see telegram)
             TestBase(
                 const std::vector<std::string>& tags = std::vector<std::string>(),
                       std::function<void()>  setup = std::function<void()>(),
@@ -449,20 +720,6 @@ namespace impl
             std::vector<std::pair<std::string, TestCase>> tests;
         };
 
-        // query to the registry for filtering
-        struct Query
-        {
-            std::vector<std::string> suites;
-            std::vector<std::string> tags;
-        };
-
-        // structure containing query error info (tags/suites that were not found)
-        struct QueryError
-        {
-            std::vector<std::string> tags;
-            std::vector<std::string> suites;
-        };
-
         enum class TestStatus : std::uint8_t
         {
             Pass,
@@ -505,7 +762,7 @@ namespace impl
         }
 
         // run tests with optional filtering
-        auto Run(const auto& query) -> void
+        auto Run(const CLI::Query& query) -> void
         {
             Summary summary;
 
@@ -537,13 +794,6 @@ namespace impl
             }
 
             fmt::ReportSummary(summary.total, summary.passed, summary.failed, summary.errors);
-        }
-
-        // parse cli into a query
-        [[nodiscard]]
-        auto ParseArgs(int argc, char** argv) -> Query
-        {
-            return Query{};
         }
 
         // get specific suite. create if not found
@@ -801,7 +1051,6 @@ export namespace nm
     auto Suite(const std::string& name) -> impl::Registry::TestSuite&
     {
         using namespace impl;
-        //return GetRegistry().AddSuite(name, Registry::TestSuite());
         return GetRegistry().GetSuite(name);
     }
 
@@ -811,10 +1060,17 @@ export namespace nm
         return impl::GetRegistry();
     }
 
+    // get the cli
+    // TODO: REMOVE ON RELEASE
+    auto CLI() -> impl::CLI&
+    {
+        return impl::GetCLI();
+    }
+
     // run all tests with optional filtering
     auto Run(const int argc = 1, char** argv = nullptr) -> void
     {
-        const auto query = impl::GetRegistry().ParseArgs(argc, argv);
+        const auto query = impl::GetCLI().Query();
         impl::GetRegistry().Run(query);
     }
 }

@@ -171,6 +171,11 @@ void TestLib()
         Run();
     }
 
+    {
+        auto cli = CLI();
+        char* args[10];
+    }
+
     std::println("--- --- [nm] test testing finished successfully");
 
     std::println("--- [nm] testing finished successfully");

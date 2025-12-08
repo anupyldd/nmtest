@@ -101,6 +101,29 @@ namespace impl
         Test,
         Teardown
     };
+
+    template<std::size_t N, std::size_t... I>
+    constexpr auto ToStdArrayImpl(char** argv, std::size_t actualSize, std::index_sequence<I...>)
+        -> std::array<char*, N>
+    {
+        static_assert(N > 0, "Array size must be greater than 0");
+        return {{((I < actualSize && argv != nullptr) ? argv[I] : nullptr)...}};
+    }
+
+    template<std::size_t N>
+    constexpr auto ToStdArrayManual(char** argv, std::size_t actualSize) -> std::array<char*, N>
+    {
+        if (actualSize > N)
+            throw std::out_of_range("actualSize exceeds array capacity");
+
+        return ToStdArrayImpl<N>(argv, actualSize, std::make_index_sequence<N>{});
+    }
+
+    template<std::size_t N>
+    constexpr auto ToStdArray(char* (&arr)[N]) -> std::array<char*, N>
+    {
+        return ToStdArrayManual<N>(arr, std::make_index_sequence<N>{});
+    }
 }
 
 namespace fmt
@@ -154,7 +177,7 @@ namespace fmt
         const std::string& errorText,
         const std::string& hint = {}) -> void
     {
-        if constexpr (hint.empty())
+        if (hint.empty())
             std::println("{} {}", error, errorText);
         else
             std::println("{} {} ({})", error, errorText, hint);
@@ -174,7 +197,7 @@ namespace fmt
         const std::string& warningText,
         const std::string& hint = {}) -> void
     {
-        if constexpr (hint.empty())
+        if (hint.empty())
             std::println("{} {}", warning, warningText);
         else
             std::println("{} {} ({})", warning, warningText, hint);
@@ -340,7 +363,7 @@ namespace impl
     class CLI
     {
     public:
-        auto helpText =
+        const char* helpText =
             "Usage:                                                                     \n"
             "  test [options]                                                           \n"
             "                                                                           \n"
@@ -361,10 +384,31 @@ namespace impl
             "        -t \"fast,slow\"     runs tests tagged fast OR slow.               \n"
             "  - Names are case-insensitive unless --case_sensitive is used.            \n";
 
+        static constexpr std::uint8_t list           = 1 << 0; // -l / --list
+        static constexpr std::uint8_t verbose        = 1 << 1; // -v / --verbose
+        static constexpr std::uint8_t caseSensitive  = 1 << 2; // -c / --case_sensitive
+        static constexpr std::uint8_t help           = 1 << 3; // -h / --help
+        static constexpr std::uint8_t hadError       = 1 << 4; // set if command had any errors
+
+        static constexpr auto suiteTextFull         = "suite";
+        static constexpr auto tagTextFull           = "tag";
+        static constexpr auto listTextFull          = "list";
+        static constexpr auto verboseTextFull       = "verbose";
+        static constexpr auto caseSensitiveTextFull = "case_sensitive";
+        static constexpr auto helpTextFull          = "help";
+
+        static constexpr auto suiteTextShort         = "s";
+        static constexpr auto tagTextShort           = "t";
+        static constexpr auto listTextShort          = "l";
+        static constexpr auto verboseTextShort       = "v";
+        static constexpr auto caseSensitiveTextShort = "c";
+        static constexpr auto helpTextShort          = "h";
+
         struct Query
         {
             std::vector<std::string> suites;
             std::vector<std::string> tags;
+            std::uint8_t flags;
         };
 
         class Parser
@@ -372,26 +416,6 @@ namespace impl
         public:
             struct Command
             {
-                static constexpr std::uint8_t list           = 1 << 0; // -l / --list
-                static constexpr std::uint8_t verbose        = 1 << 1; // -v / --verbose
-                static constexpr std::uint8_t caseSensitive  = 1 << 2; // -c / --case_sensitive
-                static constexpr std::uint8_t help           = 1 << 3; // -h / --help
-                static constexpr std::uint8_t had_error      = 1 << 4; // set if command had any errors
-
-                static constexpr auto suiteTextFull         = "suite";
-                static constexpr auto tagTextFull           = "tag";
-                static constexpr auto listTextFull          = "list";
-                static constexpr auto verboseTextFull       = "verbose";
-                static constexpr auto caseSensitiveTextFull = "case_sensitive";
-                static constexpr auto helpTextFull          = "help";
-
-                static constexpr auto suiteTextShort         = "s";
-                static constexpr auto tagTextShort           = "t";
-                static constexpr auto listTextShort          = "l";
-                static constexpr auto verboseTextShort       = "v";
-                static constexpr auto caseSensitiveTextShort = "c";
-                static constexpr auto helpTextShort          = "h";
-
                 std::string  tagArgs,
                              suiteArgs;
                 std::uint8_t flags {};
@@ -418,27 +442,27 @@ namespace impl
                 // set the 'had_error' flag
                 auto Error() -> void
                 {
-                    flags |= had_error;
+                    flags |= hadError;
                 }
             };
 
         public:
-            static auto GetQuery(const int argc, char** argv) -> std::optional<Query>
+            static auto GetQuery(const std::vector<std::string>& argVec) -> std::optional<Query>
             {
-                const auto cmd = ProcessCommand(argc, argv);
-                if (cmd.flags & Command::had_error) return std::nullopt;
+                const auto [tagArgs, suiteArgs, flags] = ProcessCommand(argVec);
+                if (flags & hadError) return std::nullopt;
 
                 auto query = Query{};
-                query.suites = ParseNames(cmd.suiteArgs);
-                query.tags   = ParseNames(cmd.tagArgs);
+                query.suites = ParseNames(suiteArgs);
+                query.tags   = ParseNames(tagArgs);
+                query.flags  = flags;
 
                 return query;
             }
 
         private:
-            static auto ProcessCommand(const int argc, char** argv) -> Command
+            static auto ProcessCommand(const std::vector<std::string>& argVec) -> Command
             {
-                const auto argVec = std::vector<std::string>(argv + 1, argv + argc);
                 auto cmd = Command{};
 
                 enum class Awaiting { SuiteFilter, TagFilter, Any };
@@ -454,8 +478,8 @@ namespace impl
                             const auto param = arg.substr(2, equal - 2);
                             const auto value = arg.substr(equal + 1);
 
-                            if (param == Command::suiteTextFull) cmd.suiteArgs  = value;
-                            else if (param == Command::tagTextFull) cmd.tagArgs = value;
+                            if (param == suiteTextFull) cmd.suiteArgs  = value;
+                            else if (param == tagTextFull) cmd.tagArgs = value;
                             else
                             {
                                 fmt::ReportUnknownParameter(param);
@@ -486,6 +510,7 @@ namespace impl
                                     fmt::ReportWarning("Overriding suite filter argument with new values",
                                         std::format("was: ", cmd.suiteArgs));
                                 cmd.suiteArgs = arg;
+                                await = Awaiting::Any;
                             }
                             break;
 
@@ -495,6 +520,7 @@ namespace impl
                                     fmt::ReportWarning("Overriding tag filter argument with new values",
                                         std::format("was: ", cmd.tagArgs));
                                 cmd.tagArgs = arg;
+                                await = Awaiting::Any;
                             }
                             break;
 
@@ -509,7 +535,7 @@ namespace impl
                 }
 
                 // optional normalization for filters
-                if (!(cmd.flags & Command::caseSensitive))
+                if (!(cmd.flags & caseSensitive))
                 {
                     cmd.suiteArgs = fmt::ToLower(cmd.suiteArgs);
                     cmd.tagArgs = fmt::ToLower(cmd.tagArgs);
@@ -527,7 +553,7 @@ namespace impl
                 {
                     auto name = std::string{};
                     std::getline(sstr, name, ',');
-                    res.push_back(name);
+                    if (!name.empty()) res.push_back(name);
                 }
 
                 for (auto& name : res)
@@ -538,6 +564,14 @@ namespace impl
                 return res;
             }
         };
+
+    public:
+        // TODO: remove
+        static auto GetParser() -> Parser&
+        {
+            static Parser parser;
+            return parser;
+        }
     };
 
     // get static CLI instance
@@ -1070,8 +1104,11 @@ export namespace nm
     // run all tests with optional filtering
     auto Run(const int argc = 1, char** argv = nullptr) -> void
     {
-        const auto query = impl::GetCLI().Query();
-        impl::GetRegistry().Run(query);
+        const auto argVec = std::vector<std::string>(argv + 1, argv + argc);
+        if (const auto query = impl::CLI::Parser::GetQuery(argVec))
+        {
+            impl::GetRegistry().Run(query.value());
+        }
     }
 }
 

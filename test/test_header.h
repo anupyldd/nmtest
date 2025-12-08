@@ -1,6 +1,7 @@
 #pragma once
 
-#include <print>
+#include "names.h"
+
 import nm;
 
 class TestClass
@@ -16,7 +17,7 @@ private:
 using namespace nm;
 
 inline TestS s{
-    "another file",
-    "test class 1",
+    names::suite2,
+    names::AddLoc("TestClass"),
     []{return Equal(10,20);}
 };

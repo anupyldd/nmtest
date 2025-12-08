@@ -8,12 +8,12 @@ auto TestClass::GetA() const -> int
 using namespace nm;
 
 inline TestS s2{
-    "another file",
-    "test class 2",
+    names::suite2,
+    names::AddLoc("TestClass2"),
     []{return Equal(10,20);}
 };
 
 template class TestT<
-    "AnotherFileTemplate",
-    "AnotherFileTemplateTest",
+    "Suite 2",
+    "TemplateTest (test_source.cpp:18)",
     []{ return Equal(1,2); }>;

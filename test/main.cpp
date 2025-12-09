@@ -158,11 +158,11 @@ void TestLib()
         .Setup([]{std::println("expected Math setup");})
         .Teardown([]{std::println("expected Math teardown");})
         .Test({
-            .name = AddLoc("FromSuite 1"),
+            .name = AddLoc("FromSuite 1.1"),
             .func = []{ return Equal(0,9); }
         })
         .Test({
-            .name = AddLoc("FromSuite 2"),
+            .name = AddLoc("FromSuite 1.2"),
             .tags = {tag1, tag2},
             .func = []{ return Equal(0,8); },
             .setup = []{ std::println("expected FromSuite 2 setup"); },
@@ -201,8 +201,73 @@ void TestLib()
     }
 
     {
-        const char* argv[] = { "test", "-s", "math,core", "-t", "fast , slow", "-v", "-c", "-l", "-h" };
-        auto argc = 9;
+        auto cli = CLI();
+
+        const char* argv[] = { "test",
+            "--suite=math,core", "--tag=fast , slow",
+            "--verbose", "--case_sensitive", "--list", "--help" };
+        auto argc = 7;
+        const auto argVec = std::vector<std::string>(argv + 1, argv + argc);
+
+        const auto q = cli.GetParser().GetQuery(argVec);
+        assert(q.has_value());
+
+        const auto [suites, tags, flags] = q.value();
+        assert(suites.size() == 2);
+        assert(tags.size() == 2);
+        assert(suites[0] == "math");
+        assert(suites[1] == "core");
+        assert(tags[0] == "fast");
+        assert(tags[1] == "slow");
+
+        assert(flags & cli.help);
+        assert(flags & cli.list);
+        assert(flags & cli.caseSensitive);
+        assert(flags & cli.verbose);
+    }
+
+    {
+        std::println("--- --- --- [nm] filter testing started");
+
+        using namespace names;
+        std::vector<std::string> args = { "test",
+            "-s", std::format("{},{}", suite1, suite2),
+            "-t", std::format("{},{}", tag1, tag2),
+            "-v" };
+        std::vector<char*> argv;
+        argv.reserve(args.size());
+        for (auto &s : args) argv.push_back(s.data());
+        auto argc = static_cast<int>(argv.size());
+
+        Run(argc, argv.data());
+    }
+
+    {
+        using namespace names;
+        std::vector<std::string> args = { "test",
+            "-s", std::format("{},{}", suite1, suite2),
+            "-t", std::format("{},{}", tag1, tag2),
+            "-h" };
+        std::vector<char*> argv;
+        argv.reserve(args.size());
+        for (auto &s : args) argv.push_back(s.data());
+        auto argc = static_cast<int>(argv.size());
+
+        Run(argc, argv.data());
+    }
+
+    {
+        using namespace names;
+        std::vector<std::string> args = { "test",
+            "-s", std::format("{},{}", suite1, suite2),
+            "-t", std::format("{},{}", tag1, tag2),
+            "-l" };
+        std::vector<char*> argv;
+        argv.reserve(args.size());
+        for (auto &s : args) argv.push_back(s.data());
+        auto argc = static_cast<int>(argv.size());
+
+        Run(argc, argv.data());
     }
 
     std::println("--- --- [nm] test testing finished successfully");

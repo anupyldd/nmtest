@@ -11,6 +11,7 @@ module;
 #include <source_location>
 #include <filesystem>
 #include <iostream>
+#include <map>
 #include <print>
 #include <ranges>
 #include <variant>
@@ -136,11 +137,17 @@ namespace fmt
     const auto fail       = "[X  FAIL]"; // "[X  FAIL]" log prefix
     const auto summary    = "[SUMMARY]"; // "[SUMMARY]" log prefix
 
-    auto ToLower(std::string str) -> std::string
+    [[nodiscard]]
+    auto ToLowerCopy(std::string str) -> std::string
     {
         std::ranges::transform(str, str.begin(),
             [](const unsigned char c){ return std::tolower(c); });
         return str;
+    }
+
+    auto ToLower(std::string& str) -> void
+    {
+        str = ToLowerCopy(str);
     }
 
     inline auto LeftTrim(std::string& str) -> void
@@ -235,6 +242,20 @@ namespace fmt
             std::println("{} {}: ", fail, testName);
             for (const auto& msg : res.Messages())
                 std::println("{} - {}", indent, msg);
+        }
+    }
+
+    auto ReportMatchList(
+        const std::map<std::string, std::vector<std::string>>& matchList) -> void
+    {
+        std::println("Matching tests:");
+        for (const auto& [suiteName, tests] : matchList)
+        {
+            std::println("{}{}", indent, suiteName);
+            for (const auto& testName : tests)
+            {
+                std::println("{}-{}", indent, testName);
+            }
         }
     }
 
@@ -363,27 +384,6 @@ namespace impl
     class CLI
     {
     public:
-        const char* helpText =
-            "Usage:                                                                     \n"
-            "  test [options]                                                           \n"
-            "                                                                           \n"
-            "Options:                                                                   \n"
-            "  -s, --suite <names>         Comma-separated list of suite names to run.  \n"
-            "  -t, --tag <names>           Comma-separated list of tag names to run.    \n"
-            "  -l, --list                  List matching tests without running them.    \n"
-            "  -c, --case_sensitive        Make name matching case-sensitive.           \n"
-            "  -h, --help                  Show this help message.                      \n"
-            "                                                                           \n"
-            "Example:                                                                   \n"
-            "  test -s \"core,math\" -t \"fast\"                                        \n"
-            "    Run all tests from suites \"core\" or \"math\" that have tag \"fast\". \n"
-            "                                                                           \n"
-            "Notes:                                                                     \n"
-            "  - Multiple suites or tags are treated as OR:                             \n"
-            "        -s \"core,math\"     runs tests in either suite.                   \n"
-            "        -t \"fast,slow\"     runs tests tagged fast OR slow.               \n"
-            "  - Names are case-insensitive unless --case_sensitive is used.            \n";
-
         static constexpr std::uint8_t list           = 1 << 0; // -l / --list
         static constexpr std::uint8_t verbose        = 1 << 1; // -v / --verbose
         static constexpr std::uint8_t caseSensitive  = 1 << 2; // -c / --case_sensitive
@@ -422,7 +422,7 @@ namespace impl
 
                 auto SetFlag(const std::string& arg) -> void
                 {
-                    const auto argNorm = fmt::ToLower(arg);
+                    const auto argNorm = fmt::ToLowerCopy(arg);
 
                     if (argNorm == listTextShort || argNorm == listTextFull)
                         flags |= list;
@@ -537,8 +537,8 @@ namespace impl
                 // optional normalization for filters
                 if (!(cmd.flags & caseSensitive))
                 {
-                    cmd.suiteArgs = fmt::ToLower(cmd.suiteArgs);
-                    cmd.tagArgs = fmt::ToLower(cmd.tagArgs);
+                    cmd.suiteArgs = fmt::ToLowerCopy(cmd.suiteArgs);
+                    cmd.tagArgs = fmt::ToLowerCopy(cmd.tagArgs);
                 }
 
                 return cmd;
@@ -571,6 +571,30 @@ namespace impl
         {
             static Parser parser;
             return parser;
+        }
+
+        constexpr static auto HelpText() -> const char*
+        {
+            return
+            "Usage:                                                                     \n"
+            "  test [options]                                                           \n"
+            "                                                                           \n"
+            "Options:                                                                   \n"
+            "  -s, --suite <names>         Comma-separated list of suite names to run.  \n"
+            "  -t, --tag <names>           Comma-separated list of tag names to run.    \n"
+            "  -l, --list                  List matching tests without running them.    \n"
+            "  -c, --case_sensitive        Make name matching case-sensitive.           \n"
+            "  -h, --help                  Show this help message.                      \n"
+            "                                                                           \n"
+            "Example:                                                                   \n"
+            "  test -s \"core,math\" -t \"fast\"                                        \n"
+            "    Run all tests from suites \"core\" or \"math\" that have tag \"fast\". \n"
+            "                                                                           \n"
+            "Notes:                                                                     \n"
+            "  - Multiple suites or tags are treated as OR:                             \n"
+            "        -s \"core,math\"     runs tests in either suite.                   \n"
+            "        -t \"fast,slow\"     runs tests tagged fast OR slow.               \n"
+            "  - Names are case-insensitive unless --case_sensitive is used.            \n";
         }
     };
 
@@ -798,36 +822,56 @@ namespace impl
         // run tests with optional filtering
         auto Run(const CLI::Query& query) -> void
         {
-            Summary summary;
+            if (query.flags & CLI::help)
+            {
+                std::println(CLI::HelpText());
+                return;
+            }
+
+            auto summary  = Summary{};
+
+            // used if 'list' flag is enabled
+            auto matchList = std::map<std::string, std::vector<std::string>>{};
+            const auto list = (query.flags & CLI::list);
 
             // iterate over suites that are in query.suites
             for (const auto& [suiteName, suite] : suites
                 | std::views::filter([&](const auto& pair)
                 {
                     if (query.suites.empty()) return true;
-                    return std::ranges::contains(query.suites, pair.first);
+                    return std::ranges::contains(query.suites, fmt::ToLowerCopy(pair.first));
                 }))
             {
-                TryInvoke(suiteName, &suite, FuncType::Setup, summary);
+                if (!list)
+                    TryInvoke(suiteName, &suite, FuncType::Setup, query, summary);
 
                 for (const auto& [testName, test] : suite.Tests()
                     | std::views::filter([&](const auto& pair)
                     {
                         if (query.tags.empty()) return true;
                         for (const auto& tag : pair.second.TestBase::Tags())
-                            if (std::ranges::contains(query.tags, tag)) return true;
+                            if (std::ranges::contains(query.tags, fmt::ToLowerCopy(tag))) return true;
                         return false;
                     }))
                 {
-                    TryInvoke(testName, &test, FuncType::Setup,    summary);
-                    TryInvoke(testName, &test, FuncType::Test,     summary);
-                    TryInvoke(testName, &test, FuncType::Teardown, summary);
+                    if (list)
+                        matchList[suiteName].push_back(testName);
+                    else
+                    {
+                        TryInvoke(testName, &test, FuncType::Setup, query,    summary);
+                        TryInvoke(testName, &test, FuncType::Test, query,     summary);
+                        TryInvoke(testName, &test, FuncType::Teardown, query, summary);
+                    }
                 }
 
-                TryInvoke(suiteName, &suite, FuncType::Teardown, summary);
+                if (!list)
+                    TryInvoke(suiteName, &suite, FuncType::Teardown, query, summary);
             }
 
-            fmt::ReportSummary(summary.total, summary.passed, summary.failed, summary.errors);
+            if (list)
+                fmt::ReportMatchList(matchList);
+            else
+                fmt::ReportSummary(summary.total, summary.passed, summary.failed, summary.errors);
         }
 
         // get specific suite. create if not found
@@ -884,8 +928,11 @@ namespace impl
             const std::string& name,
             const TestBase*    testOrSuite,
             const FuncType     funcType,
+            const CLI::Query&  query,
                   Summary&     summary) -> void
         {
+            const auto flags = query.flags;
+
             try
             {
                 if (const auto* suite = dynamic_cast<const TestSuite*>(testOrSuite))
@@ -936,12 +983,12 @@ namespace impl
 
                             if (!test->Func())
                             {
-                                fmt::ReportMissingTest(name);
+                                if (flags & CLI::verbose) fmt::ReportMissingTest(name);
                                 return;
                             }
 
                             const auto res = test->Func()();
-                            fmt::ReportResult(name, res);
+                            if (flags & CLI::verbose) fmt::ReportResult(name, res);
                             if (res)
                             {
                                 ++summary.passed;
@@ -954,12 +1001,12 @@ namespace impl
             }
             catch (const std::exception& e)
             {
-                fmt::ReportException(funcType, name, e.what());
+                if (flags & CLI::verbose) fmt::ReportException(funcType, name, e.what());
                 summary.errors.emplace_back(name);
             }
             catch (...)
             {
-                fmt::ReportException(funcType, name);
+                if (flags & CLI::verbose) fmt::ReportException(funcType, name);
                 summary.errors.emplace_back(name);
             }
 

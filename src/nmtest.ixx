@@ -1125,7 +1125,10 @@ export namespace nm
     // run all tests with optional filtering
     auto Run(const int argc = 1, char** argv = nullptr) -> void
     {
-        const auto argVec = std::vector<std::string>(argv + 1, argv + argc);
+        auto argVec = std::vector<std::string>{};
+        if (argv && argc > 1)
+            argVec.assign(argv + 1, argv + argc);
+
         if (const auto query = impl::CLI::Parser::GetQuery(argVec))
         {
             impl::GetRegistry().Run(query.value());

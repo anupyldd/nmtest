@@ -25,9 +25,9 @@ export namespace nm
     public:
         Result(
             const bool success = true,
-                  std::string type = std::string(),       // type of assert (e.g. "Equal")
-                  std::string message = std::string(),    // custom message provided by the user
-            const std::source_location& loc = std::source_location())
+                  std::string type = {},       // type of assert (e.g. "Equal")
+                  std::string message = {},    // custom message provided by the user
+            const std::source_location& loc = {})
             : success(success)
         {
             if (!success)
@@ -102,29 +102,6 @@ namespace impl
         Test,
         Teardown
     };
-
-    template<std::size_t N, std::size_t... I>
-    constexpr auto ToStdArrayImpl(char** argv, std::size_t actualSize, std::index_sequence<I...>)
-        -> std::array<char*, N>
-    {
-        static_assert(N > 0, "Array size must be greater than 0");
-        return {{((I < actualSize && argv != nullptr) ? argv[I] : nullptr)...}};
-    }
-
-    template<std::size_t N>
-    constexpr auto ToStdArrayManual(char** argv, std::size_t actualSize) -> std::array<char*, N>
-    {
-        if (actualSize > N)
-            throw std::out_of_range("actualSize exceeds array capacity");
-
-        return ToStdArrayImpl<N>(argv, actualSize, std::make_index_sequence<N>{});
-    }
-
-    template<std::size_t N>
-    constexpr auto ToStdArray(char* (&arr)[N]) -> std::array<char*, N>
-    {
-        return ToStdArrayManual<N>(arr, std::make_index_sequence<N>{});
-    }
 }
 
 namespace fmt
@@ -190,9 +167,8 @@ namespace fmt
             std::println("{} {} ({})", error, errorText, hint);
     }
 
-    // TODO: change parameter to option
-    // print an error like "[! ERROR] Unknown option 'some param'"
-    constexpr auto ReportUnknownParameter(
+    // print an error like "[! ERROR] Unknown option 'some option'"
+    constexpr auto ReportUnknownOption(
         const std::string& errorText,
         const std::string& hint = "Use '-h/--help' to see the list of available options") -> void
     {
@@ -214,7 +190,7 @@ namespace fmt
     constexpr auto ReportException(
         const impl::FuncType type,
         const std::string& name,
-        const std::string& what = std::string()) -> void
+        const std::string& what = {}) -> void
     {
         const auto funcType = (type == impl::FuncType::Setup) ?
             "Setup" : (type == impl::FuncType::Teardown) ?
@@ -434,7 +410,7 @@ namespace impl
                         flags |= help;
                     else
                     {
-                        fmt::ReportUnknownParameter(argNorm);
+                        fmt::ReportUnknownOption(argNorm);
                         Error();
                     }
                 }
@@ -482,7 +458,7 @@ namespace impl
                             else if (param == tagTextFull) cmd.tagArgs = value;
                             else
                             {
-                                fmt::ReportUnknownParameter(param);
+                                fmt::ReportUnknownOption(param);
                                 cmd.Error();
                             }
                             await = Awaiting::Any;
@@ -526,7 +502,7 @@ namespace impl
 
                             case Awaiting::Any:
                             {
-                                fmt::ReportUnknownParameter(arg);
+                                fmt::ReportUnknownOption(arg);
                                 cmd.Error();
                             }
                             break;
@@ -616,9 +592,9 @@ namespace impl
         public:
             // TODO: change init to {} (see telegram)
             TestBase(
-                const std::vector<std::string>& tags = std::vector<std::string>(),
-                      std::function<void()>  setup = std::function<void()>(),
-                      std::function<void()>  teardown = std::function<void()>())
+                const std::vector<std::string>& tags = {},
+                      std::function<void()>     setup = {},
+                      std::function<void()>     teardown = {})
                     : setup(std::move(setup)), teardown(std::move(teardown)), tags(tags) {}
 
             virtual ~TestBase() = default;
@@ -654,10 +630,10 @@ namespace impl
         {
         public:
             TestCase(
-                const std::vector<std::string>& tags = std::vector<std::string>(),
-                      std::function<nm::Result()> func = std::function<nm::Result()>(),
-                      std::function<void()> setup = std::function<void()>(),
-                      std::function<void()> teardown = std::function<void()>())
+                const std::vector<std::string>&   tags     = {},
+                      std::function<nm::Result()> func     = {},
+                      std::function<void()>       setup    = {},
+                      std::function<void()>       teardown = {})
                     : TestBase(tags, std::move(setup), std::move(teardown)), func(std::move(func)) {}
 
             ~TestCase() override = default;
@@ -707,9 +683,9 @@ namespace impl
         {
         public:
             TestSuite(
-                const std::vector<std::string>& tags = std::vector<std::string>(),
-                      std::function<void()> setup = std::function<void()>(),
-                      std::function<void()> teardown = std::function<void()>())
+                const std::vector<std::string>& tags = {},
+                      std::function<void()>     setup = {},
+                      std::function<void()>     teardown = {})
                     : TestBase(tags, std::move(setup), std::move(teardown)) {}
 
             ~TestSuite() override = default;
@@ -797,7 +773,7 @@ namespace impl
         // register a suite
         auto AddSuite(
             const std::string& name,
-            const TestSuite& suite) -> TestSuite&
+            const TestSuite&   suite) -> TestSuite&
         {
             suites[name] = suite;
             return suites[name];
@@ -807,7 +783,7 @@ namespace impl
         auto AddTest(
             const std::string& suite,
             const std::string& name,
-            const TestCase& test) -> TestCase&
+            const TestCase&    test) -> TestCase&
         {
             return suites[suite].Test(name, test);
         }
@@ -1009,8 +985,6 @@ namespace impl
                 if (flags & CLI::verbose) fmt::ReportException(funcType, name);
                 summary.errors.emplace_back(name);
             }
-
-
         }
 
     private:

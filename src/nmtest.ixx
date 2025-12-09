@@ -11,6 +11,7 @@ module;
 #include <source_location>
 #include <filesystem>
 #include <iostream>
+#include <map>
 #include <print>
 #include <ranges>
 
@@ -23,9 +24,9 @@ export namespace nm
     public:
         Result(
             const bool success = true,
-                  std::string type = std::string(),       // type of assert (e.g. "Equal")
-                  std::string message = std::string(),    // custom message provided by the user
-            const std::source_location& loc = std::source_location())
+                  std::string type = {},       // type of assert (e.g. "Equal")
+                  std::string message = {},    // custom message provided by the user
+            const std::source_location& loc = {})
             : success(success)
         {
             if (!success)
@@ -108,13 +109,45 @@ namespace fmt
     const auto suite      = "[  SUITE]"; // "[  SUITE]" log prefix
     const auto pass       = "[   PASS]"; // "[   PASS]" log prefix
     const auto error      = "[! ERROR]"; // "[! ERROR]" log prefix
+    const auto warning    = "[?  WARN]"; // "[?  WARN]" log prefix
     const auto fail       = "[X  FAIL]"; // "[X  FAIL]" log prefix
     const auto summary    = "[SUMMARY]"; // "[SUMMARY]" log prefix
+
+    [[nodiscard]]
+    auto ToLowerCopy(std::string str) -> std::string
+    {
+        std::ranges::transform(str, str.begin(),
+            [](const unsigned char c){ return std::tolower(c); });
+        return str;
+    }
+
+    auto ToLower(std::string& str) -> void
+    {
+        str = ToLowerCopy(str);
+    }
+
+    inline auto LeftTrim(std::string& str) -> void
+    {
+        str.erase(str.begin(), std::ranges::find_if(str,
+            [](const unsigned char ch) { return !std::isspace(ch); }));
+    }
+
+    inline auto RightTrim(std::string& str) -> void
+    {
+        str.erase(std::find_if(str.rbegin(), str.rend(),
+            [](const unsigned char ch) { return !std::isspace(ch); }).base(), str.end());
+    }
+
+    inline auto Trim(std::string& str) -> void
+    {
+        LeftTrim(str);
+        RightTrim(str);
+    }
 
     // format assert with actual and expected values
     template<typename T>
     [[nodiscard]]
-    constexpr auto ActualExpected(
+    auto ActualExpected(
         const std::string& type,
         const T& actual,
         const T& expected) -> std::string
@@ -122,11 +155,41 @@ namespace fmt
         return std::format("{}({}:{})", type, actual, expected);
     }
 
+    // print an error like "[! ERROR] some error text (hint)"
+    auto ReportError(
+        const std::string& errorText,
+        const std::string& hint = {}) -> void
+    {
+        if (hint.empty())
+            std::println("{} {}", error, errorText);
+        else
+            std::println("{} {} ({})", error, errorText, hint);
+    }
+
+    // print an error like "[! ERROR] Unknown option 'some option'"
+    auto ReportUnknownOption(
+        const std::string& errorText,
+        const std::string& hint = "Use '-h/--help' to see the list of available options") -> void
+    {
+        ReportError(std::format("Unknown option '{}'", errorText), hint);
+    }
+
+    // print an error like "[! ERROR] some error text (hint)"
+    auto ReportWarning(
+        const std::string& warningText,
+        const std::string& hint = {}) -> void
+    {
+        if (hint.empty())
+            std::println("{} {}", warning, warningText);
+        else
+            std::println("{} {} ({})", warning, warningText, hint);
+    }
+
     // print an error like "[! ERROR] Test 1: Setup function has thrown an unhandled exception 'whatever'"
-    constexpr auto ReportException(
+    auto ReportException(
         const impl::FuncType type,
         const std::string& name,
-        const std::string& what = std::string()) -> void
+        const std::string& what = {}) -> void
     {
         const auto funcType = (type == impl::FuncType::Setup) ?
             "Setup" : (type == impl::FuncType::Teardown) ?
@@ -141,7 +204,7 @@ namespace fmt
                 fmt::error, name, funcType, what);
     };
 
-    constexpr auto ReportResult(
+    auto ReportResult(
         const std::string& testName,
         const nm::Result& res) -> void
     {
@@ -157,6 +220,20 @@ namespace fmt
         }
     }
 
+    auto ReportMatchList(
+        const std::map<std::string, std::vector<std::string>>& matchList) -> void
+    {
+        std::println("Matching tests:");
+        for (const auto& [suiteName, tests] : matchList)
+        {
+            std::println("{}{}", indent, suiteName);
+            for (const auto& testName : tests)
+            {
+                std::println("{}-{}", indent, testName);
+            }
+        }
+    }
+
     auto ReportSummary(
         const int total,
         const int passed,
@@ -169,8 +246,6 @@ namespace fmt
             passed << "; Failed: " <<
             failed.size() << "; Errors: " <<
             errors.size() << '\n';
-        //std::println("{} Total: {}; Passed: {}; Failed: {}; Errors: {}",
-        //    summary, passed, failed.size(), errors.size());
 
         if (!failed.empty())
         {
@@ -277,6 +352,225 @@ namespace impl
         return val;
     }
 
+    // CLI --------------------------------------------------------------------
+
+    class CLI
+    {
+    public:
+        static constexpr std::uint8_t list           = 1 << 0; // -l / --list
+        static constexpr std::uint8_t verbose        = 1 << 1; // -v / --verbose
+        static constexpr std::uint8_t caseSensitive  = 1 << 2; // -c / --case_sensitive
+        static constexpr std::uint8_t help           = 1 << 3; // -h / --help
+        static constexpr std::uint8_t hadError       = 1 << 4; // set if command had any errors
+
+        static constexpr auto suiteTextFull         = "suite";
+        static constexpr auto tagTextFull           = "tag";
+        static constexpr auto listTextFull          = "list";
+        static constexpr auto verboseTextFull       = "verbose";
+        static constexpr auto caseSensitiveTextFull = "case_sensitive";
+        static constexpr auto helpTextFull          = "help";
+
+        static constexpr auto suiteTextShort         = "s";
+        static constexpr auto tagTextShort           = "t";
+        static constexpr auto listTextShort          = "l";
+        static constexpr auto verboseTextShort       = "v";
+        static constexpr auto caseSensitiveTextShort = "c";
+        static constexpr auto helpTextShort          = "h";
+
+        struct Query
+        {
+            std::vector<std::string> suites;
+            std::vector<std::string> tags;
+            std::uint8_t flags;
+        };
+
+        class Parser
+        {
+        public:
+            struct Command
+            {
+                std::string  tagArgs,
+                             suiteArgs;
+                std::uint8_t flags {};
+
+                auto SetFlag(const std::string& arg) -> void
+                {
+                    const auto argNorm = fmt::ToLowerCopy(arg);
+
+                    if (argNorm == listTextShort || argNorm == listTextFull)
+                        flags |= list;
+                    else if (argNorm == verboseTextShort || argNorm == verboseTextFull)
+                        flags |= verbose;
+                    else if (argNorm == caseSensitiveTextShort || argNorm == caseSensitiveTextFull)
+                        flags |= caseSensitive;
+                    else if (argNorm == helpTextShort || argNorm == helpTextFull)
+                        flags |= help;
+                    else
+                    {
+                        fmt::ReportUnknownOption(argNorm);
+                        Error();
+                    }
+                }
+
+                // set the 'had_error' flag
+                auto Error() -> void
+                {
+                    flags |= hadError;
+                }
+            };
+
+        public:
+            static auto GetQuery(const std::vector<std::string>& argVec) -> std::optional<Query>
+            {
+                const auto [tagArgs, suiteArgs, flags] = ProcessCommand(argVec);
+                if (flags & hadError) return std::nullopt;
+
+                auto query = Query{};
+                query.suites = ParseNames(suiteArgs);
+                query.tags   = ParseNames(tagArgs);
+                query.flags  = flags;
+
+                return query;
+            }
+
+        private:
+            static auto ProcessCommand(const std::vector<std::string>& argVec) -> Command
+            {
+                auto cmd = Command{};
+
+                enum class Awaiting { SuiteFilter, TagFilter, Any };
+                auto await = Awaiting::Any;
+
+                for (const auto& arg : argVec)
+                {
+                    if (arg.starts_with("--"))
+                    {
+                        if (arg.contains('='))
+                        {
+                            const auto equal = arg.find_first_of('=');
+                            const auto param = arg.substr(2, equal - 2);
+                            const auto value = arg.substr(equal + 1);
+
+                            if (param == suiteTextFull) cmd.suiteArgs  = value;
+                            else if (param == tagTextFull) cmd.tagArgs = value;
+                            else
+                            {
+                                fmt::ReportUnknownOption(param);
+                                cmd.Error();
+                            }
+                            await = Awaiting::Any;
+                        }
+                        else
+                        {
+                            cmd.SetFlag(arg.substr(2));
+                        }
+                    }
+                    else if (arg.starts_with('-'))
+                    {
+                        const auto param = arg.substr(1);
+
+                        if (param == "s") await = Awaiting::SuiteFilter;
+                        else if (param == "t") await = Awaiting::TagFilter;
+                        else cmd.SetFlag(param);
+                    }
+                    else
+                    {
+                        switch (await)
+                        {
+                            case Awaiting::SuiteFilter:
+                            {
+                                if (!cmd.suiteArgs.empty())
+                                    fmt::ReportWarning("Overriding suite filter argument with new values",
+                                        std::format("was: ", cmd.suiteArgs));
+                                cmd.suiteArgs = arg;
+                                await = Awaiting::Any;
+                            }
+                            break;
+
+                            case Awaiting::TagFilter:
+                            {
+                                if (!cmd.tagArgs.empty())
+                                    fmt::ReportWarning("Overriding tag filter argument with new values",
+                                        std::format("was: ", cmd.tagArgs));
+                                cmd.tagArgs = arg;
+                                await = Awaiting::Any;
+                            }
+                            break;
+
+                            case Awaiting::Any:
+                            {
+                                fmt::ReportUnknownOption(arg);
+                                cmd.Error();
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                // optional normalization for filters
+                if (!(cmd.flags & caseSensitive))
+                {
+                    cmd.suiteArgs = fmt::ToLowerCopy(cmd.suiteArgs);
+                    cmd.tagArgs = fmt::ToLowerCopy(cmd.tagArgs);
+                }
+
+                return cmd;
+            }
+
+            static auto ParseNames(const std::string& arg) -> std::vector<std::string>
+            {
+                auto sstr = std::stringstream{arg};
+                auto res = std::vector<std::string>{};
+
+                while (sstr.good())
+                {
+                    auto name = std::string{};
+                    std::getline(sstr, name, ',');
+                    if (!name.empty()) res.push_back(name);
+                }
+
+                for (auto& name : res)
+                {
+                    fmt::Trim(name);
+                }
+
+                return res;
+            }
+        };
+
+    public:
+        constexpr static auto HelpText() -> const char*
+        {
+            return
+            "Usage:                                                                     \n"
+            "  test [options]                                                           \n"
+            "                                                                           \n"
+            "Options:                                                                   \n"
+            "  -s, --suite <names>         Comma-separated list of suite names to run.  \n"
+            "  -t, --tag <names>           Comma-separated list of tag names to run.    \n"
+            "  -l, --list                  List matching tests without running them.    \n"
+            "  -c, --case_sensitive        Make name matching case-sensitive.           \n"
+            "  -h, --help                  Show this help message.                      \n"
+            "                                                                           \n"
+            "Example:                                                                   \n"
+            "  test -s \"core,math\" -t \"fast\"                                        \n"
+            "    Run all tests from suites \"core\" or \"math\" that have tag \"fast\". \n"
+            "                                                                           \n"
+            "Notes:                                                                     \n"
+            "  - Multiple suites or tags are treated as OR:                             \n"
+            "        -s \"core,math\"     runs tests in either suite.                   \n"
+            "        -t \"fast,slow\"     runs tests tagged fast OR slow.               \n"
+            "  - Names are case-insensitive unless --case_sensitive is used.            \n";
+        }
+    };
+
+    // get static CLI instance
+    auto GetCLI() -> CLI&
+    {
+        static CLI reg;
+        return reg;
+    }
+
     // REGISTRY ---------------------------------------------------------------
 
     class Registry
@@ -287,9 +581,9 @@ namespace impl
         {
         public:
             TestBase(
-                const std::vector<std::string>& tags = std::vector<std::string>(),
-                      std::function<void()>  setup = std::function<void()>(),
-                      std::function<void()>  teardown = std::function<void()>())
+                const std::vector<std::string>& tags = {},
+                      std::function<void()>     setup = {},
+                      std::function<void()>     teardown = {})
                     : setup(std::move(setup)), teardown(std::move(teardown)), tags(tags) {}
 
             virtual ~TestBase() = default;
@@ -325,10 +619,10 @@ namespace impl
         {
         public:
             TestCase(
-                const std::vector<std::string>& tags = std::vector<std::string>(),
-                      std::function<nm::Result()> func = std::function<nm::Result()>(),
-                      std::function<void()> setup = std::function<void()>(),
-                      std::function<void()> teardown = std::function<void()>())
+                const std::vector<std::string>&   tags     = {},
+                      std::function<nm::Result()> func     = {},
+                      std::function<void()>       setup    = {},
+                      std::function<void()>       teardown = {})
                     : TestBase(tags, std::move(setup), std::move(teardown)), func(std::move(func)) {}
 
             ~TestCase() override = default;
@@ -378,9 +672,9 @@ namespace impl
         {
         public:
             TestSuite(
-                const std::vector<std::string>& tags = std::vector<std::string>(),
-                      std::function<void()> setup = std::function<void()>(),
-                      std::function<void()> teardown = std::function<void()>())
+                const std::vector<std::string>& tags = {},
+                      std::function<void()>     setup = {},
+                      std::function<void()>     teardown = {})
                     : TestBase(tags, std::move(setup), std::move(teardown)) {}
 
             ~TestSuite() override = default;
@@ -449,20 +743,6 @@ namespace impl
             std::vector<std::pair<std::string, TestCase>> tests;
         };
 
-        // query to the registry for filtering
-        struct Query
-        {
-            std::vector<std::string> suites;
-            std::vector<std::string> tags;
-        };
-
-        // structure containing query error info (tags/suites that were not found)
-        struct QueryError
-        {
-            std::vector<std::string> tags;
-            std::vector<std::string> suites;
-        };
-
         enum class TestStatus : std::uint8_t
         {
             Pass,
@@ -482,7 +762,7 @@ namespace impl
         // register a suite
         auto AddSuite(
             const std::string& name,
-            const TestSuite& suite) -> TestSuite&
+            const TestSuite&   suite) -> TestSuite&
         {
             suites[name] = suite;
             return suites[name];
@@ -492,7 +772,7 @@ namespace impl
         auto AddTest(
             const std::string& suite,
             const std::string& name,
-            const TestCase& test) -> TestCase&
+            const TestCase&    test) -> TestCase&
         {
             return suites[suite].Test(name, test);
         }
@@ -505,45 +785,58 @@ namespace impl
         }
 
         // run tests with optional filtering
-        auto Run(const auto& query) -> void
+        auto Run(const CLI::Query& query) -> void
         {
-            Summary summary;
+            if (query.flags & CLI::help)
+            {
+                std::println(CLI::HelpText());
+                return;
+            }
+
+            auto summary  = Summary{};
+
+            // used if 'list' flag is enabled
+            auto matchList = std::map<std::string, std::vector<std::string>>{};
+            const auto list = (query.flags & CLI::list);
 
             // iterate over suites that are in query.suites
             for (const auto& [suiteName, suite] : suites
                 | std::views::filter([&](const auto& pair)
                 {
                     if (query.suites.empty()) return true;
-                    return std::ranges::contains(query.suites, pair.first);
+                    return std::ranges::contains(query.suites, fmt::ToLowerCopy(pair.first));
                 }))
             {
-                TryInvoke(suiteName, &suite, FuncType::Setup, summary);
+                if (!list)
+                    TryInvoke(suiteName, &suite, FuncType::Setup, query, summary);
 
                 for (const auto& [testName, test] : suite.Tests()
                     | std::views::filter([&](const auto& pair)
                     {
                         if (query.tags.empty()) return true;
                         for (const auto& tag : pair.second.TestBase::Tags())
-                            if (std::ranges::contains(query.tags, tag)) return true;
+                            if (std::ranges::contains(query.tags, fmt::ToLowerCopy(tag))) return true;
                         return false;
                     }))
                 {
-                    TryInvoke(testName, &test, FuncType::Setup,    summary);
-                    TryInvoke(testName, &test, FuncType::Test,     summary);
-                    TryInvoke(testName, &test, FuncType::Teardown, summary);
+                    if (list)
+                        matchList[suiteName].push_back(testName);
+                    else
+                    {
+                        TryInvoke(testName, &test, FuncType::Setup, query,    summary);
+                        TryInvoke(testName, &test, FuncType::Test, query,     summary);
+                        TryInvoke(testName, &test, FuncType::Teardown, query, summary);
+                    }
                 }
 
-                TryInvoke(suiteName, &suite, FuncType::Teardown, summary);
+                if (!list)
+                    TryInvoke(suiteName, &suite, FuncType::Teardown, query, summary);
             }
 
-            fmt::ReportSummary(summary.total, summary.passed, summary.failed, summary.errors);
-        }
-
-        // parse cli into a query
-        [[nodiscard]]
-        auto ParseArgs(int argc, char** argv) -> Query
-        {
-            return Query{};
+            if (list)
+                fmt::ReportMatchList(matchList);
+            else
+                fmt::ReportSummary(summary.total, summary.passed, summary.failed, summary.errors);
         }
 
         // get specific suite. create if not found
@@ -600,8 +893,11 @@ namespace impl
             const std::string& name,
             const TestBase*    testOrSuite,
             const FuncType     funcType,
+            const CLI::Query&  query,
                   Summary&     summary) -> void
         {
+            const auto flags = query.flags;
+
             try
             {
                 if (const auto* suite = dynamic_cast<const TestSuite*>(testOrSuite))
@@ -652,12 +948,12 @@ namespace impl
 
                             if (!test->Func())
                             {
-                                fmt::ReportMissingTest(name);
+                                if (flags & CLI::verbose) fmt::ReportMissingTest(name);
                                 return;
                             }
 
                             const auto res = test->Func()();
-                            fmt::ReportResult(name, res);
+                            if (flags & CLI::verbose) fmt::ReportResult(name, res);
                             if (res)
                             {
                                 ++summary.passed;
@@ -670,16 +966,14 @@ namespace impl
             }
             catch (const std::exception& e)
             {
-                fmt::ReportException(funcType, name, e.what());
+                if (flags & CLI::verbose) fmt::ReportException(funcType, name, e.what());
                 summary.errors.emplace_back(name);
             }
             catch (...)
             {
-                fmt::ReportException(funcType, name);
+                if (flags & CLI::verbose) fmt::ReportException(funcType, name);
                 summary.errors.emplace_back(name);
             }
-
-
         }
 
     private:
@@ -717,7 +1011,6 @@ namespace impl
         {
             using namespace impl;
             if (!name.empty()) GetRegistry().LastSuite(&(GetRegistry().GetSuite(name)));
-            std::println("!!!!! created suite name");
         }
         SuiteName(const char* name) : SuiteName(std::string(name)) {}
     };
@@ -727,7 +1020,6 @@ namespace impl
         {
             using namespace impl;
             if (!name.empty()) GetRegistry().LastTest(&(GetRegistry().LastSuite()->Test(name)));
-            std::println("!!!!! created test name");
         }
         TestName(const char* name) : TestName(std::string(name)) {}
     };
@@ -739,7 +1031,6 @@ namespace impl
             using namespace impl;
             const std::function<nm::Result()> fn = std::forward<F>(f);
             if (fn) GetRegistry().LastTest()->Func(fn);
-            std::println("!!!!! created test func");
         }
     };
     struct SetupFunc
@@ -750,7 +1041,6 @@ namespace impl
             using namespace impl;
             const std::function<void()> fn = std::forward<F>(f);
             GetRegistry().LastTest()->Setup(fn);
-            std::println("!!!!! created test func");
         }
     };
 }
@@ -801,7 +1091,7 @@ export namespace nm
     auto Suite(const std::string& name) -> impl::Registry::TestSuite&
     {
         using namespace impl;
-        return GetRegistry().AddSuite(name, Registry::TestSuite());
+        return GetRegistry().GetSuite(name);
     }
 
     // get the registry
@@ -810,11 +1100,25 @@ export namespace nm
         return impl::GetRegistry();
     }
 
+    // get the cli
+    /*
+    auto CLI() -> impl::CLI&
+    {
+        return impl::GetCLI();
+    }
+    */
+
     // run all tests with optional filtering
     auto Run(const int argc = 1, char** argv = nullptr) -> void
     {
-        const auto query = impl::GetRegistry().ParseArgs(argc, argv);
-        impl::GetRegistry().Run(query);
+        auto argVec = std::vector<std::string>{};
+        if (argv && argc > 1)
+            argVec.assign(argv + 1, argv + argc);
+
+        if (const auto query = impl::CLI::Parser::GetQuery(argVec))
+        {
+            impl::GetRegistry().Run(query.value());
+        }
     }
 }
 

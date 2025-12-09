@@ -176,6 +176,8 @@ void TestLib()
         //Suite("Core",)
     }
 
+    /*
+
     {
         auto cli = CLI();
 
@@ -225,6 +227,8 @@ void TestLib()
         assert(flags & cli.caseSensitive);
         assert(flags & cli.verbose);
     }
+
+    */
 
     {
         std::println("--- --- --- [nm] filter testing started");

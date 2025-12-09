@@ -14,7 +14,6 @@ module;
 #include <map>
 #include <print>
 #include <ranges>
-#include <variant>
 
 export module nm;
 
@@ -148,7 +147,7 @@ namespace fmt
     // format assert with actual and expected values
     template<typename T>
     [[nodiscard]]
-    constexpr auto ActualExpected(
+    auto ActualExpected(
         const std::string& type,
         const T& actual,
         const T& expected) -> std::string
@@ -157,7 +156,7 @@ namespace fmt
     }
 
     // print an error like "[! ERROR] some error text (hint)"
-    constexpr auto ReportError(
+    auto ReportError(
         const std::string& errorText,
         const std::string& hint = {}) -> void
     {
@@ -168,7 +167,7 @@ namespace fmt
     }
 
     // print an error like "[! ERROR] Unknown option 'some option'"
-    constexpr auto ReportUnknownOption(
+    auto ReportUnknownOption(
         const std::string& errorText,
         const std::string& hint = "Use '-h/--help' to see the list of available options") -> void
     {
@@ -176,7 +175,7 @@ namespace fmt
     }
 
     // print an error like "[! ERROR] some error text (hint)"
-    constexpr auto ReportWarning(
+    auto ReportWarning(
         const std::string& warningText,
         const std::string& hint = {}) -> void
     {
@@ -187,7 +186,7 @@ namespace fmt
     }
 
     // print an error like "[! ERROR] Test 1: Setup function has thrown an unhandled exception 'whatever'"
-    constexpr auto ReportException(
+    auto ReportException(
         const impl::FuncType type,
         const std::string& name,
         const std::string& what = {}) -> void
@@ -205,7 +204,7 @@ namespace fmt
                 fmt::error, name, funcType, what);
     };
 
-    constexpr auto ReportResult(
+    auto ReportResult(
         const std::string& testName,
         const nm::Result& res) -> void
     {
@@ -247,8 +246,6 @@ namespace fmt
             passed << "; Failed: " <<
             failed.size() << "; Errors: " <<
             errors.size() << '\n';
-        //std::println("{} Total: {}; Passed: {}; Failed: {}; Errors: {}",
-        //    summary, passed, failed.size(), errors.size());
 
         if (!failed.empty())
         {
@@ -542,13 +539,6 @@ namespace impl
         };
 
     public:
-        // TODO: remove
-        static auto GetParser() -> Parser&
-        {
-            static Parser parser;
-            return parser;
-        }
-
         constexpr static auto HelpText() -> const char*
         {
             return
@@ -590,7 +580,6 @@ namespace impl
         class TestBase
         {
         public:
-            // TODO: change init to {} (see telegram)
             TestBase(
                 const std::vector<std::string>& tags = {},
                       std::function<void()>     setup = {},
@@ -1022,7 +1011,6 @@ namespace impl
         {
             using namespace impl;
             if (!name.empty()) GetRegistry().LastSuite(&(GetRegistry().GetSuite(name)));
-            std::println("!!!!! created suite name");
         }
         SuiteName(const char* name) : SuiteName(std::string(name)) {}
     };
@@ -1032,7 +1020,6 @@ namespace impl
         {
             using namespace impl;
             if (!name.empty()) GetRegistry().LastTest(&(GetRegistry().LastSuite()->Test(name)));
-            std::println("!!!!! created test name");
         }
         TestName(const char* name) : TestName(std::string(name)) {}
     };
@@ -1044,7 +1031,6 @@ namespace impl
             using namespace impl;
             const std::function<nm::Result()> fn = std::forward<F>(f);
             if (fn) GetRegistry().LastTest()->Func(fn);
-            std::println("!!!!! created test func");
         }
     };
     struct SetupFunc
@@ -1055,7 +1041,6 @@ namespace impl
             using namespace impl;
             const std::function<void()> fn = std::forward<F>(f);
             GetRegistry().LastTest()->Setup(fn);
-            std::println("!!!!! created test func");
         }
     };
 }
@@ -1116,11 +1101,12 @@ export namespace nm
     }
 
     // get the cli
-    // TODO: REMOVE ON RELEASE
+    /*
     auto CLI() -> impl::CLI&
     {
         return impl::GetCLI();
     }
+    */
 
     // run all tests with optional filtering
     auto Run(const int argc = 1, char** argv = nullptr) -> void

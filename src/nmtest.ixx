@@ -112,6 +112,7 @@ namespace fmt
     const auto warning    = "[?  WARN]"; // "[?  WARN]" log prefix
     const auto fail       = "[X  FAIL]"; // "[X  FAIL]" log prefix
     const auto summary    = "[SUMMARY]"; // "[SUMMARY]" log prefix
+    const auto matchList  = "[   LIST]"; // "[   LIST]" log prefix
 
     [[nodiscard]]
     auto ToLowerCopy(std::string str) -> std::string
@@ -223,13 +224,13 @@ namespace fmt
     auto ReportMatchList(
         const std::map<std::string, std::vector<std::string>>& matchList) -> void
     {
-        std::println("Matching tests:");
+        std::println("{} Matching tests:", fmt::matchList);
         for (const auto& [suiteName, tests] : matchList)
         {
-            std::println("{}{}", indent, suiteName);
+            std::println("{} {}", indent, suiteName);
             for (const auto& testName : tests)
             {
-                std::println("{}-{}", indent, testName);
+                std::println("{} - {}", indent, testName);
             }
         }
     }

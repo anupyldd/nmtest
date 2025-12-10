@@ -139,11 +139,13 @@ void TestLib()
         Test(suite1, AddLoc("Subtraction"))
         .Setup([]{ std::println("expected setup func 2"); })
         .Teardown([]{ std::println("expected teardown func 2"); })
+        .Tags({tag1, tag2})
         .Func([]
         {
-            return Equal(2 - 1, 5)
-            & Equal(1, 1)
-            & NotEqual(2, 2);
+            return
+              Equal   (2-1, 5)
+            & Equal   (1,   1)
+            & NotEqual(2,   2);
         });
 
         Test(suite1, AddLoc("Multiplication"))
@@ -172,8 +174,6 @@ void TestLib()
         auto ref = Registry();
 
         Run();
-
-        //Suite("Core",)
     }
 
     /*

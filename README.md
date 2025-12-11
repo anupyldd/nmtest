@@ -85,9 +85,6 @@ that happens before `main()`. *(Preferred when you need to create a test in a gl
     ```
 4) Single test through template initialization. Works in global scope like *Method 3* 
 and does not require naming each test. 
-Stricter syntax and requires the test to be in a source file (not header).
-*(Left in mainly because it's an interesting trick to avoid naming each individual test object.
-Can be used, but is quite finicky)*
    ```c++
    template class TestT<
        "suite name",

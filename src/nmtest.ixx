@@ -1056,25 +1056,42 @@ export namespace nm
         impl::TestFunc func;
     };
 
+    // tracks if the test has already been registered
+    // to prevent duplicate registration
+    template<impl::StructuralString suite,
+             impl::StructuralString name>
+    bool testRegistered = false;
     // template structure for registering a test
     template<impl::StructuralString suite,
              impl::StructuralString name,
-             Result (* func) ()>
+             Result (* func) (),
+             //std::initializer_list<const char*> tags = {},
+             void   (* setup) () = nullptr,
+             void   (* teardown) () = nullptr>
     struct TestT
     {
         TestT()
         {
-            using namespace impl;
-            GetRegistry().LastTest(&(GetRegistry().AddTest(suite, name, Registry::TestCase{})));
-            GetRegistry().LastTest()->Func(func);
+            if (!testRegistered<suite, name>)
+            {
+                using namespace impl;
+                GetRegistry().LastTest(&(GetRegistry().AddTest(suite, name, Registry::TestCase{})));
+                GetRegistry().LastTest()->Func(func);
+                GetRegistry().LastTest()->Setup(setup);
+                GetRegistry().LastTest()->Teardown(teardown);
+                testRegistered<suite, name> = true;
+            }
         }
 
         static const TestT registerer;
     };
-    template <impl::StructuralString suite,
-              impl::StructuralString name,
-              Result (* func) ()>
-    const TestT<suite, name, func> TestT<suite, name, func>::registerer;
+    template<impl::StructuralString suite,
+             impl::StructuralString name,
+             Result (* func) (),
+             void   (* setup) () = nullptr,
+             void   (* teardown) () = nullptr>
+    const TestT<suite, name, func, setup, teardown>
+        TestT<suite, name, func, setup, teardown>::registerer;
 
     // ------------------------------------------------------------------------
 

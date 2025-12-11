@@ -3,7 +3,7 @@
 It provides a set of standalone functions for various checks, as well as an API
 to organize them into suites and run with optional filtering.
 
-Why macro-free? See [my blog post]() detailing the motivation and implementation details.
+Why macro-free? See [this blog post]() detailing the motivation and implementation details.
 
 The library itself can be found in the `nmtest.ixx` file in the `src/` folder. You can
 just copy it to your project. `C++23` is required.
@@ -77,7 +77,7 @@ at once, and can do it in a function context)*
 but allows creating tests in global scope, outside any function, through static initialization
 that happens before `main()`. *(Preferred when you need to create a test in a global context)*
     ```c++
-    TestS s2{
+    TestS test{
         "suite name",
         "test name",
         []{ return Equal(1,2); }
@@ -144,7 +144,8 @@ Summary example:
           - Multiplication (main.cpp:167)
 ```
 
-The `Errors` occur when there's an unhandled exception in the test, setup, or teardown function.
+The `Errors` occur when there's an unhandled exception in the test, setup, or teardown function,
+or if the test function is missing.
 
 #### Running and Filtering
 

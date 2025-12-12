@@ -80,16 +80,37 @@ that happens before `main()`. *(Preferred when you need to create a test in a gl
     TestS test{
         "suite name",
         "test name",
-        []{ return Equal(1,2); }
+        []{ return Equal(1,2); },
+        {"tag 1", "tag 2"},
+        []{ std::println("setup"); },
+        []{ std::println("teardown"); }
     };
     ```
-4) Single test through template initialization. Works in global scope like *Method 3* 
+4) Single test through object creation, but now with designated initialization.
+Still requires naming each individual test object, and still works in global scope.
+*(Use in place of Method 3 if you prefer the designated initialization syntax)*
+```c++
+TestSD test{
+    {
+        .suite    = "suite name",
+        .name     = "test name",
+        .tags     = { "tag 1", "tag 2" },
+        .func     = []{ return Equal(0,2); }
+        .setup    = []{ std::println("setup"); },
+        .teardown = []{ std::println("setup"); }
+    }
+};
+```
+5) Single test through template initialization. Works in global scope like *Method 3* 
 and does not require naming each test. 
    ```c++
    template class TestT<
-       "suite name",
-       "test name",
-       []{ return Equal(1,2); }>;
+        "suite name",
+        "test name",
+        []{ return Equal(1,2); }
+        std::array{"tag 1", "tag 2"}>,
+        []{ std::println("setup"); },
+        []{ std::println("teardown"); };
    ```
 
 #### Test functions

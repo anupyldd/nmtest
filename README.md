@@ -102,7 +102,8 @@ TestSD test{
 };
 ```
 5) Single test through template initialization. Works in global scope like *Method 3* 
-and does not require naming each test. 
+and does not require naming each test. *(Can be used to avoid naming each individual
+test, but is a bit more finicky)*
    ```c++
    template class TestT<
         "suite name",

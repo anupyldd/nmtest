@@ -1024,7 +1024,6 @@ namespace impl
     {
         SuiteName(const std::string& name)
         {
-            using namespace impl;
             if (!name.empty()) GetRegistry().LastSuite(&(GetRegistry().GetSuite(name)));
         }
         SuiteName(const char* name) : SuiteName(std::string(name)) {}
@@ -1033,7 +1032,6 @@ namespace impl
     {
         TestName(const std::string& name)
         {
-            using namespace impl;
             if (!name.empty()) GetRegistry().LastTest(&(GetRegistry().LastSuite()->Test(name)));
         }
         TestName(const char* name) : TestName(std::string(name)) {}
@@ -1043,19 +1041,43 @@ namespace impl
         template<class F, class = std::enable_if_t<std::is_invocable_r_v<nm::Result, F>>>
         TestFunc(F&& f)
         {
-            using namespace impl;
             const std::function<nm::Result()> fn = std::forward<F>(f);
             if (fn) GetRegistry().LastTest()->Func(fn);
         }
     };
     struct SetupFunc
     {
+        SetupFunc() = default;
+
         template<class F, class = std::enable_if_t<std::is_invocable_r_v<void, F>>>
         SetupFunc(F&& f)
         {
-            using namespace impl;
             const std::function<void()> fn = std::forward<F>(f);
             GetRegistry().LastTest()->Setup(fn);
+        }
+    };
+    struct TeardownFunc
+    {
+        TeardownFunc() = default;
+
+        template<class F, class = std::enable_if_t<std::is_invocable_r_v<void, F>>>
+        TeardownFunc(F&& f)
+        {
+            const std::function<void()> fn = std::forward<F>(f);
+            GetRegistry().LastTest()->Setup(fn);
+        }
+    };
+    struct TagList
+    {
+        TagList() = default;
+
+        TagList(const std::vector<std::string>& tags)
+        {
+            GetRegistry().LastTest()->Tags(tags);
+        }
+        TagList(const std::initializer_list<std::string>& tags)
+        {
+            GetRegistry().LastTest()->Tags(tags);
         }
     };
 }
@@ -1068,6 +1090,9 @@ export namespace nm
         impl::SuiteName suite;
         impl::TestName test;
         impl::TestFunc func;
+        impl::TagList tags;
+        impl::SetupFunc setup;
+        impl::TeardownFunc teardown;
     };
 
     // tracks if the test has already been registered

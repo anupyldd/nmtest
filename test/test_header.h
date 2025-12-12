@@ -1,5 +1,7 @@
 #pragma once
 
+#include <print>
+
 #include "names.h"
 
 import nm;
@@ -25,4 +27,7 @@ inline TestS s{
 template class TestT<
     "Suite 2",
     "!!!TemplateTest (test_source.cpp:18)",
-    []{ return Equal(1,2); }>;
+    []{ return Equal(1,2); },
+    std::array{"Tag 1", "Tag 2"},
+    []{ std::println("setup"); },
+    []{ std::println("teardown"); }>;

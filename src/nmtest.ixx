@@ -112,6 +112,7 @@ namespace fmt
     const auto warning    = "[?  WARN]"; // "[?  WARN]" log prefix
     const auto fail       = "[X  FAIL]"; // "[X  FAIL]" log prefix
     const auto summary    = "[SUMMARY]"; // "[SUMMARY]" log prefix
+    const auto matchList  = "[   LIST]"; // "[   LIST]" log prefix
 
     [[nodiscard]]
     auto ToLowerCopy(std::string str) -> std::string
@@ -223,13 +224,13 @@ namespace fmt
     auto ReportMatchList(
         const std::map<std::string, std::vector<std::string>>& matchList) -> void
     {
-        std::println("Matching tests:");
+        std::println("{} Matching tests:", fmt::matchList);
         for (const auto& [suiteName, tests] : matchList)
         {
-            std::println("{}{}", indent, suiteName);
+            std::println("{} {}", indent, suiteName);
             for (const auto& testName : tests)
             {
-                std::println("{}-{}", indent, testName);
+                std::println("{} - {}", indent, testName);
             }
         }
     }
@@ -261,7 +262,7 @@ namespace fmt
         }
     }
 
-    void ReportMissingTest(const std::string& testName)
+    auto ReportMissingTest(const std::string& testName) -> void
     {
         std::println("{} {}: missing the test function", error, testName);
     }
@@ -656,12 +657,24 @@ namespace impl
             }
 
             // add tags
-            auto Tags(const std::initializer_list<std::string>& tagList) -> TestCase&
+            auto Tags(const std::vector<std::string>& tagList) -> TestCase&
             {
                 tags.reserve(tags.size() + tagList.size());
                 for (const auto& tag : tagList)
                     tags.push_back(tag);
                 return *this;
+            }
+
+            auto Info() const -> std::string
+            {
+                auto tagSstr = std::stringstream{};
+                for (auto i = 0z; i < tags.size(); ++i)
+                    tagSstr << tags[i] << ((i == tags.size() - 1) ? "" : ", ");
+                return std::format("Tags: [{}]; Setup: {}; Func: {}; Teardown: {}",
+                    tagSstr.str(),
+                    (setup    ? "V" : "X"),
+                    (func     ? "V" : "X"),
+                    (teardown ? "V" : "X"));
             }
 
         private:
@@ -717,7 +730,7 @@ namespace impl
             }
 
             // add tags
-            auto Tags(const std::initializer_list<std::string>& tagList) -> TestSuite&
+            auto Tags(const std::vector<std::string>& tagList) -> TestSuite&
             {
                 tags.reserve(tags.size() + tagList.size());
                 for (const auto& tag : tagList)
@@ -798,6 +811,8 @@ namespace impl
             // used if 'list' flag is enabled
             auto matchList = std::map<std::string, std::vector<std::string>>{};
             const auto list = (query.flags & CLI::list);
+            auto testInfo = [&](const std::string& name, const TestCase& test)
+                { return std::format("{} ({})", name, test.Info()); };
 
             // iterate over suites that are in query.suites
             for (const auto& [suiteName, suite] : suites
@@ -820,7 +835,7 @@ namespace impl
                     }))
                 {
                     if (list)
-                        matchList[suiteName].push_back(testName);
+                        matchList[suiteName].push_back(testInfo(testName, test));
                     else
                     {
                         TryInvoke(testName, &test, FuncType::Setup, query,    summary);
@@ -1009,7 +1024,6 @@ namespace impl
     {
         SuiteName(const std::string& name)
         {
-            using namespace impl;
             if (!name.empty()) GetRegistry().LastSuite(&(GetRegistry().GetSuite(name)));
         }
         SuiteName(const char* name) : SuiteName(std::string(name)) {}
@@ -1018,7 +1032,6 @@ namespace impl
     {
         TestName(const std::string& name)
         {
-            using namespace impl;
             if (!name.empty()) GetRegistry().LastTest(&(GetRegistry().LastSuite()->Test(name)));
         }
         TestName(const char* name) : TestName(std::string(name)) {}
@@ -1028,19 +1041,43 @@ namespace impl
         template<class F, class = std::enable_if_t<std::is_invocable_r_v<nm::Result, F>>>
         TestFunc(F&& f)
         {
-            using namespace impl;
             const std::function<nm::Result()> fn = std::forward<F>(f);
             if (fn) GetRegistry().LastTest()->Func(fn);
         }
     };
     struct SetupFunc
     {
+        SetupFunc() = default;
+
         template<class F, class = std::enable_if_t<std::is_invocable_r_v<void, F>>>
         SetupFunc(F&& f)
         {
-            using namespace impl;
             const std::function<void()> fn = std::forward<F>(f);
             GetRegistry().LastTest()->Setup(fn);
+        }
+    };
+    struct TeardownFunc
+    {
+        TeardownFunc() = default;
+
+        template<class F, class = std::enable_if_t<std::is_invocable_r_v<void, F>>>
+        TeardownFunc(F&& f)
+        {
+            const std::function<void()> fn = std::forward<F>(f);
+            GetRegistry().LastTest()->Setup(fn);
+        }
+    };
+    struct TagList
+    {
+        TagList() = default;
+
+        TagList(const std::vector<std::string>& tags)
+        {
+            GetRegistry().LastTest()->Tags(tags);
+        }
+        TagList(const std::initializer_list<std::string>& tags)
+        {
+            GetRegistry().LastTest()->Tags(tags);
         }
     };
 }
@@ -1051,29 +1088,77 @@ export namespace nm
     struct TestS
     {
         impl::SuiteName suite;
-        impl::TestName test;
+        impl::TestName name;
         impl::TestFunc func;
+        impl::TagList tags;
+        impl::SetupFunc setup;
+        impl::TeardownFunc teardown;
     };
 
+    // alternative structure for registering a test
+    // but with designated initializers
+    struct TestSD
+    {
+        struct Args
+        {
+            std::string suite;
+            std::string name;
+            std::vector<std::string> tags;
+            std::function<Result()> func;
+            std::function<void()> setup;
+            std::function<void()> teardown;
+        };
+
+        TestSD(Args args)
+        {
+            if (!args.suite.empty() && !args.name.empty() && args.func)
+            impl::GetRegistry().AddTest(args.suite, args.name,
+                {args.tags, args.func, args.setup, args.teardown});
+        }
+    };
+
+    // tracks if the test has already been registered
+    // to prevent duplicate registration
+    template<impl::StructuralString suite,
+             impl::StructuralString name>
+    bool testRegistered = false;
     // template structure for registering a test
     template<impl::StructuralString suite,
              impl::StructuralString name,
-             Result (* func) ()>
+             Result (* func) (),
+             auto tags = std::array<const char*, 0>{},
+             void (* setup) () = {},
+             void (* teardown) () = {}>
     struct TestT
     {
         TestT()
         {
-            using namespace impl;
-            GetRegistry().LastTest(&(GetRegistry().AddTest(suite, name, Registry::TestCase{})));
-            GetRegistry().LastTest()->Func(func);
+            if (!testRegistered<suite, name>)
+            {
+                using namespace impl;
+                GetRegistry().LastTest(&(GetRegistry().AddTest(suite, name, Registry::TestCase{})));
+                GetRegistry().LastTest()->Func(func);
+                GetRegistry().LastTest()->Setup(setup);
+                GetRegistry().LastTest()->Teardown(teardown);
+
+                auto tagList = std::vector<std::string>{};
+                for (const auto& t : tags) tagList.push_back(t);
+                GetRegistry().LastTest()->Tags(tagList);
+
+                testRegistered<suite, name> = true;
+            }
         }
 
         static const TestT registerer;
     };
-    template <impl::StructuralString suite,
-              impl::StructuralString name,
-              Result (* func) ()>
-    const TestT<suite, name, func> TestT<suite, name, func>::registerer;
+    template<impl::StructuralString suite,
+             impl::StructuralString name,
+             Result (* func) (),
+             auto tags = std::array<const char*, 0>{},
+             void (* setup) () = nullptr,
+             void (* teardown) () = nullptr>
+    const TestT<suite, name, func, tags, setup, teardown>
+        TestT<suite, name, func, tags, setup, teardown>::registerer;
 
     // ------------------------------------------------------------------------
 
@@ -1081,8 +1166,7 @@ export namespace nm
     auto Test(
         const std::string& suite,
         const std::string& name,
-        const std::initializer_list<std::string>& tags =
-              std::initializer_list<std::string>()) -> impl::Registry::TestCase&
+        const std::vector<std::string>& tags = {}) -> impl::Registry::TestCase&
     {
         return impl::GetRegistry().AddTest(suite, name, impl::Registry::TestCase(tags));
     }

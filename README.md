@@ -81,9 +81,9 @@ that happens before `main()`. *(Preferred when you need to create a test in a gl
         "suite name",
         "test name",
         []{ return Equal(1,2); },
-        {"tag 1", "tag 2"},
-        []{ std::println("setup"); },
-        []{ std::println("teardown"); }
+        { /* optional tag list */ },
+        []{ /* optional setup function */ },
+        []{ /* optional teardown function */ }
     };
     ```
 4) Single test through object creation, but now with designated initialization.
@@ -94,10 +94,10 @@ TestSD test{
     {
         .suite    = "suite name",
         .name     = "test name",
-        .tags     = { "tag 1", "tag 2" },
+        .tags     = { /* optional tag list */ },
         .func     = []{ return Equal(0,2); }
-        .setup    = []{ std::println("setup"); },
-        .teardown = []{ std::println("setup"); }
+        .setup    = []{ /* optional setup function */ },
+        .teardown = []{ /* optional teardown function */ }
     }
 };
 ```
@@ -109,9 +109,9 @@ test, but is a bit more finicky)*
         "suite name",
         "test name",
         []{ return Equal(1,2); }
-        std::array{"tag 1", "tag 2"}>,
-        []{ std::println("setup"); },
-        []{ std::println("teardown"); };
+        std::array{ /* optional tag list */ }>,
+        []{ /* optional setup function */ },
+        []{ /* optional teardown function */ };
    ```
 
 #### Test functions

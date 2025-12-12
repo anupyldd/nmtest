@@ -274,6 +274,17 @@ void TestLib()
         Run(argc, argv.data());
     }
 
+    {
+        using namespace names;
+        std::vector<std::string> args = { "test", "-l" };
+        std::vector<char*> argv;
+        argv.reserve(args.size());
+        for (auto &s : args) argv.push_back(s.data());
+        auto argc = static_cast<int>(argv.size());
+
+        Run(argc, argv.data());
+    }
+
     std::println("--- --- [nm] test testing finished successfully");
 
     std::println("--- [nm] testing finished successfully");

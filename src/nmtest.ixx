@@ -1095,28 +1095,6 @@ export namespace nm
         impl::TeardownFunc teardown;
     };
 
-    // alternative structure for registering a test
-    // but with designated initializers
-    struct TestSD
-    {
-        struct Args
-        {
-            std::string suite;
-            std::string name;
-            std::vector<std::string> tags;
-            std::function<Result()> func;
-            std::function<void()> setup;
-            std::function<void()> teardown;
-        };
-
-        TestSD(Args args)
-        {
-            if (!args.suite.empty() && !args.name.empty() && args.func)
-            impl::GetRegistry().AddTest(args.suite, args.name,
-                {args.tags, args.func, args.setup, args.teardown});
-        }
-    };
-
     // tracks if the test has already been registered
     // to prevent duplicate registration
     template<impl::StructuralString suite,

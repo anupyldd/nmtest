@@ -78,30 +78,15 @@ but allows creating tests in global scope, outside any function, through static 
 that happens before `main()`. *(Preferred when you need to create a test in a global context)*
     ```c++
     TestS test{
-        "suite name",
-        "test name",
-        []{ return Equal(1,2); },
-        { /* optional tag list */ },
-        []{ /* optional setup function */ },
-        []{ /* optional teardown function */ }
-    };
-    ```
-4) Single test through object creation, but now with designated initialization.
-Still requires naming each individual test object, and still works in global scope.
-*(Use in place of Method 3 if you prefer the designated initialization syntax)*
-```c++
-TestSD test{
-    {
         .suite    = "suite name",
         .name     = "test name",
+        .func     = []{ return Equal(1,2); },
         .tags     = { /* optional tag list */ },
-        .func     = []{ return Equal(0,2); }
         .setup    = []{ /* optional setup function */ },
         .teardown = []{ /* optional teardown function */ }
-    }
-};
-```
-5) Single test through template initialization. Works in global scope like *Method 3* 
+    };
+    ```
+4) Single test through template initialization. Works in global scope like *Method 3* 
 and does not require naming each test. *(Can be used to avoid naming each individual
 test, but is a bit more finicky)*
    ```c++

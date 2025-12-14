@@ -3,7 +3,8 @@
 It provides a set of standalone functions for various checks, as well as an API
 to organize them into suites and run with optional filtering.
 
-Why macro-free? See [this blog post]() detailing the motivation and implementation details.
+Why macro-free? See [this blog post](https://outdoordoor.bearblog.dev/exploring-macro-free-testing-in-modern-cpp/) 
+detailing the motivation and implementation details.
 
 The library itself can be found in the `nmtest.ixx` file in the `src/` folder. You can
 just copy it to your project. `C++23` is required.
@@ -48,7 +49,7 @@ A test is automatically registered upon creation - no need for manual registrati
 For each test there are only 3 required fields: *suite name, test name and test function*.
 Optional fields are: *tags, setup function, teardown function*.
 
-1) Single test. *(Best when you need to create a single test and can do it in a function context)*
+1) Single test. *(Best when you need to create a single test and can do it in a function scope)*
     ```c++
     Test("suite name", "test name")
     .Setup([]{ /* optional setup function */ })
@@ -58,7 +59,7 @@ Optional fields are: *tags, setup function, teardown function*.
     ```
 
 2) Suite with any number of tests. *(Best when you need to register several tests into a single suite
-at once, and can do it in a function context)*
+at once, and can do it in a function scope)*
     ```c++
     Suite("suite name")
     .Setup([]{ /* optional suite setup*/ })
@@ -75,42 +76,28 @@ at once, and can do it in a function context)*
     ```
 3) Single test through object creation. Requires naming each individual test object, 
 but allows creating tests in global scope, outside any function, through static initialization
-that happens before `main()`. *(Preferred when you need to create a test in a global context)*
+that happens before `main()`. *(Preferred when you need to create a test in a global scope)*
     ```c++
     TestS test{
-        "suite name",
-        "test name",
-        []{ return Equal(1,2); },
-        {"tag 1", "tag 2"},
-        []{ std::println("setup"); },
-        []{ std::println("teardown"); }
-    };
-    ```
-4) Single test through object creation, but now with designated initialization.
-Still requires naming each individual test object, and still works in global scope.
-*(Use in place of Method 3 if you prefer the designated initialization syntax)*
-```c++
-TestSD test{
-    {
         .suite    = "suite name",
         .name     = "test name",
-        .tags     = { "tag 1", "tag 2" },
-        .func     = []{ return Equal(0,2); }
-        .setup    = []{ std::println("setup"); },
-        .teardown = []{ std::println("setup"); }
-    }
-};
-```
-5) Single test through template initialization. Works in global scope like *Method 3* 
-and does not require naming each test. 
+        .func     = []{ return Equal(1,2); },
+        .tags     = { /* optional tag list */ },
+        .setup    = []{ /* optional setup function */ },
+        .teardown = []{ /* optional teardown function */ }
+    };
+    ```
+4) Single test through template initialization. Works in global scope like *Method 3* 
+and does not require naming each test. Test/setup/teardown lambdas must have **no captures**.
+*(Can be used to avoid naming each individual test, but is a bit more finicky)*
    ```c++
    template class TestT<
         "suite name",
         "test name",
         []{ return Equal(1,2); }
-        std::array{"tag 1", "tag 2"}>,
-        []{ std::println("setup"); },
-        []{ std::println("teardown"); };
+        std::array{ /* optional tag list */ },
+        []{ /* optional setup function */ },
+        []{ /* optional teardown function */ };
    ```
 
 #### Test functions

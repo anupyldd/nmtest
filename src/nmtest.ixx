@@ -1009,6 +1009,8 @@ namespace impl
     template<std::size_t N>
     struct StructuralString
     {
+        static_assert(N > 0);
+
         constexpr StructuralString(const char (&str)[N])
         {
             std::copy_n(str, N, string);
@@ -1025,6 +1027,7 @@ namespace impl
         SuiteName(const std::string& name)
         {
             if (!name.empty()) GetRegistry().LastSuite(&(GetRegistry().GetSuite(name)));
+            else GetRegistry().LastSuite(nullptr);
         }
         SuiteName(const char* name) : SuiteName(std::string(name)) {}
     };
@@ -1032,7 +1035,9 @@ namespace impl
     {
         TestName(const std::string& name)
         {
-            if (!name.empty()) GetRegistry().LastTest(&(GetRegistry().LastSuite()->Test(name)));
+            if (!name.empty() && GetRegistry().LastSuite())
+                GetRegistry().LastTest(&(GetRegistry().LastSuite()->Test(name)));
+            else GetRegistry().LastTest(nullptr);
         }
         TestName(const char* name) : TestName(std::string(name)) {}
     };
@@ -1041,8 +1046,8 @@ namespace impl
         template<class F, class = std::enable_if_t<std::is_invocable_r_v<nm::Result, F>>>
         TestFunc(F&& f)
         {
-            const std::function<nm::Result()> fn = std::forward<F>(f);
-            if (fn) GetRegistry().LastTest()->Func(fn);
+            const auto fn = std::forward<F>(f);
+            if (fn && GetRegistry().LastTest()) GetRegistry().LastTest()->Func(fn);
         }
     };
     struct SetupFunc
@@ -1052,8 +1057,8 @@ namespace impl
         template<class F, class = std::enable_if_t<std::is_invocable_r_v<void, F>>>
         SetupFunc(F&& f)
         {
-            const std::function<void()> fn = std::forward<F>(f);
-            GetRegistry().LastTest()->Setup(fn);
+            const auto fn = std::forward<F>(f);
+            if (fn && GetRegistry().LastTest()) GetRegistry().LastTest()->Setup(fn);
         }
     };
     struct TeardownFunc
@@ -1064,7 +1069,7 @@ namespace impl
         TeardownFunc(F&& f)
         {
             const std::function<void()> fn = std::forward<F>(f);
-            GetRegistry().LastTest()->Setup(fn);
+            if (fn && GetRegistry().LastTest())GetRegistry().LastTest()->Setup(fn);
         }
     };
     struct TagList
@@ -1073,11 +1078,11 @@ namespace impl
 
         TagList(const std::vector<std::string>& tags)
         {
-            GetRegistry().LastTest()->Tags(tags);
+            if (GetRegistry().LastTest()) GetRegistry().LastTest()->Tags(tags);
         }
         TagList(const std::initializer_list<std::string>& tags)
         {
-            GetRegistry().LastTest()->Tags(tags);
+            if (GetRegistry().LastTest()) GetRegistry().LastTest()->Tags(tags);
         }
     };
 }
@@ -1087,11 +1092,11 @@ export namespace nm
     // structure for registering a test
     struct TestS
     {
-        impl::SuiteName suite;
-        impl::TestName name;
-        impl::TestFunc func;
-        impl::TagList tags;
-        impl::SetupFunc setup;
+        impl::SuiteName    suite;
+        impl::TestName     name;
+        impl::TestFunc     func;
+        impl::TagList      tags;
+        impl::SetupFunc    setup;
         impl::TeardownFunc teardown;
     };
 
@@ -1099,7 +1104,7 @@ export namespace nm
     // to prevent duplicate registration
     template<impl::StructuralString suite,
              impl::StructuralString name>
-    bool testRegistered = false;
+    inline bool testRegistered = false;
     // template structure for registering a test
     template<impl::StructuralString suite,
              impl::StructuralString name,
@@ -1107,7 +1112,7 @@ export namespace nm
              auto tags = std::array<const char*, 0>{},
              void (* setup) () = {},
              void (* teardown) () = {}>
-    struct TestT
+    class TestT
     {
         TestT()
         {
